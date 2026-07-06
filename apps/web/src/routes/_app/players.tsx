@@ -24,11 +24,14 @@ import {
   TableHeader,
   TableRow,
 } from "@J-schedule/ui/components/table";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
 import { useState } from "react";
 
-export const Route = createFileRoute("/_auth/players")({
+export const Route = createFileRoute("/_app/players")({
+  beforeLoad: ({ context }) => {
+    if (!context.player.isAdmin) throw redirect({ to: "/matches" });
+  },
   component: PlayersPage,
 });
 
@@ -75,11 +78,18 @@ function PlayerRow({ player }: { player: Doc<"players"> }) {
   const setIsAdmin = useMutation(api.players.setIsAdmin);
   const softDeletePlayer = useMutation(api.players.softDeletePlayer);
   const [level, setLevel] = useState(player.level ?? "");
+  const [pendingAdmin, setPendingAdmin] = useState<boolean | null>(null);
 
   return (
     <TableRow>
       <TableCell>
-        {player.firstName} {player.lastName ?? ""}
+        <Link
+          to="/players/$playerId"
+          params={{ playerId: player._id }}
+          className="hover:underline underline-offset-2"
+        >
+          {player.firstName} {player.lastName ?? ""}
+        </Link>
         {player.type === "guest" && (
           <Badge variant="secondary" className="ml-2">
             гость
@@ -104,10 +114,42 @@ function PlayerRow({ player }: { player: Doc<"players"> }) {
       <TableCell>
         <Checkbox
           checked={player.isAdmin}
-          onCheckedChange={(checked) =>
-            setIsAdmin({ playerId: player._id, isAdmin: checked === true })
-          }
+          onCheckedChange={(checked) => setPendingAdmin(checked === true)}
         />
+        <AlertDialog
+          open={pendingAdmin !== null}
+          onOpenChange={(open) => {
+            if (!open) setPendingAdmin(null);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {pendingAdmin
+                  ? `Сделать ${player.firstName} администратором?`
+                  : `Забрать права администратора у ${player.firstName}?`}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {pendingAdmin
+                  ? "Администратор сможет создавать и редактировать игры, управлять игроками и назначать других администраторов."
+                  : "Игрок потеряет доступ к управлению играми и игроками."}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Назад</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  if (pendingAdmin !== null) {
+                    setIsAdmin({ playerId: player._id, isAdmin: pendingAdmin });
+                  }
+                  setPendingAdmin(null);
+                }}
+              >
+                Подтвердить
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </TableCell>
       <TableCell className="text-right">
         <AlertDialog>

@@ -1,5 +1,5 @@
 import { api } from "@J-schedule/backend/convex/_generated/api";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useMutation } from "convex/react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -9,7 +9,10 @@ import MatchForm, {
   matchFormValuesToArgs,
 } from "@/components/match-form";
 
-export const Route = createFileRoute("/_auth/matches/new")({
+export const Route = createFileRoute("/_app/matches/new")({
+  beforeLoad: ({ context }) => {
+    if (!context.player.isAdmin) throw redirect({ to: "/matches" });
+  },
   component: NewMatchPage,
 });
 

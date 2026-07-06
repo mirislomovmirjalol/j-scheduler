@@ -21,7 +21,7 @@ export const Route = createFileRoute("/login")({
   beforeLoad: async () => {
     const player = await getCurrentPlayer();
     if (player) {
-      throw redirect({ to: player.isAdmin ? "/dashboard" : "/schedule" });
+      throw redirect({ to: "/matches" });
     }
   },
 });

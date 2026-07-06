@@ -5,7 +5,8 @@
     "build": {
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**", ".output/**", ".vercel/output/**"],
+      "env": ["VITE_CONVEX_URL", "VITE_CONVEX_SITE_URL", "VITE_TELEGRAM_BOT_USERNAME"]
     },
     "lint": {
       "dependsOn": ["^lint"]

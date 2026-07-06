@@ -6,7 +6,7 @@ import { Skeleton } from "@J-schedule/ui/components/skeleton";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
 
-export const Route = createFileRoute("/_player/history")({
+export const Route = createFileRoute("/_app/history")({
   component: HistoryPage,
 });
 

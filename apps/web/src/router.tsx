@@ -28,6 +28,11 @@ export function getRouter() {
   const router = createTanStackRouter({
     routeTree,
     defaultPreload: "intent",
+    // Defaults (1000ms/500ms) hide real latency behind dead air before any
+    // loading UI appears, reading as the app "doing nothing" for a beat.
+    // Lower thresholds surface the pending state almost immediately instead.
+    defaultPendingMs: 150,
+    defaultPendingMinMs: 150,
     defaultPendingComponent: () => <Loader />,
     defaultNotFoundComponent: () => (
       <div className="flex h-full items-center justify-center text-muted-foreground">

@@ -159,137 +159,29 @@ the Drop button, tapping it soft-deleted the membership
 (`isDeleted: true` confirmed in the DB), and the dead-man's-switch ran clean
 (nothing overdue, as expected since T-3h wasn't due yet).
 
-## Milestone 8 — Admin dashboard (TanStack Start) ✅
+## Milestone 8 — Web dashboard rewrite (pure Vite + TanStack Router) [~]
 
-- [x] Telegram Login Widget auth → map to player, gate on `isAdmin`. Telegram
-      has no "Web Login" OIDC option registered for this bot, so this uses
-      the classic HMAC-signed widget instead: a custom better-auth plugin
-      (`convex/auth/telegramPlugin.ts`) verifies the signature server-side
-      (bot token never leaves Convex), links the better-auth user to our
-      `players` row via `authUserId`, and `requireAdminPlayer`/
-      `requireAuthedPlayer` (`convex/players.ts`) gate every admin
-      query/mutation off `ctx.auth.getUserIdentity()` — never a
-      client-supplied id. Removed the scaffolded email/password auth
-      entirely (no passwords, per CLAUDE.md).
-- [x] Match CRUD: create / edit / reschedule / soft-delete (cancel).
-      `createMatch`/`editMatch`/`cancelMatch` in `convex/matches.ts`, all
-      admin-gated. This also closed the Milestone 4 "known gap" — `createdBy`
-      is now derived from the session, not trusted from the client.
-- [x] Court free-text input with autocomplete from history.
-      `matches.listCourtHistory` + a `<datalist>` in the match form.
-- [x] Roster management: view all members + trigger times; remove; **promote
-      from waitlist** (admin-only). `memberships.removeMember` /
-      `promoteFromWaitlist`, match detail page tables.
-- [x] Add **guest** (quick form: name required; note/level optional).
-      `memberships.addGuestToMatch` — creates the guest player row and joins
-      them to the match in one step.
-- [x] "Extra seats" flow: raising `maxMembers` → bump board **+** DM waitlist
-      (option c). `telegram/notify.ts` extraSeatsOpened — notifies, does not
-      auto-promote (admin still promotes explicitly).
-- [x] Manage players: assign level, grant/revoke admin, soft-delete.
-      `/players` page + `updateLevel`/`setIsAdmin`/`softDeletePlayer`.
+Scraps the original TanStack Start dashboard (admin + read-only player view)
+for a from-scratch rebuild in a new app (`apps/admin`), client-only (no SSR).
+Designed and built step-by-step together, one screen/flow at a time — not
+implemented from a big upfront spec. The Convex backend (`packages/backend`)
+is unaffected; this only replaces the frontend.
 
-**Test:** every dashboard write reflects in the group board live. ✅ Verified
-live end-to-end through a real browser (via an ngrok tunnel, since the
-Telegram widget requires a public HTTPS domain registered via
-@BotFather /setdomain): login → dashboard → match list → create match all
-confirmed working by the user.
+Motivation: repeated, hard-to-resolve upstream friction deploying TanStack
+Start (Nitro) to Vercel, plus wanting a more deliberate, modern,
+design-focused UI than the first pass.
 
-**Real bug hit and fixed along the way:** calling `fetchAuthQuery` (from
-`@convex-dev/better-auth/react-start`) directly inside a route's
-`beforeLoad` pulls its transitive `@tanstack/react-start/server` import
-into the **client** bundle — that module does `new AsyncLocalStorage()`
-(Node-only) as an unguarded top-level side effect, which throws in the
-browser. Fix: wrap every such call in its own `createServerFn()` written
-directly in the route file (matches the pattern TanStack Start's compiler
-actually code-splits on — extracting the wrapper into a shared lib file
-breaks the split and produces a *different* "createServerFn is not a
-function" error in production builds, so each route defines its own
-inline wrapper). Confirmed via build output: zero `AsyncLocalStorage`
-references in any client chunk after the fix.
+- [ ] Scaffold `apps/admin`: Vite + TanStack Router, Telegram Login Widget
+      auth (reuses the existing server-side verification in
+      `convex/auth/telegramPlugin.ts` — no backend changes needed).
+- [ ] Re-cover the full feature surface as each piece is redesigned: unified
+      match list/detail (admin + player), match CRUD, roster/waitlist
+      management, guest add, player management + profile, "Отправить в
+      группу", personal history.
+- [ ] Once the new app is live end-to-end, retire `apps/web` and update
+      CLAUDE.md's tech stack table (currently lists "TanStack Start").
 
-Also fixed while debugging this: `SITE_URL` was never actually pushed as a
-Convex env var (only sat in a local `.env.local` hint file), and
-`trustedOrigins` was hardcoded to one origin — added `EXTRA_TRUSTED_ORIGIN`
-(dev-only) so a tunnel URL can be trusted for widget testing without
-touching prod config.
-
-**Test:** every dashboard write reflects in the group board live.
-
-## Milestone 9 — Read-only player web view ✅
-
-- [x] Telegram Login → player view. Same widget/login flow as the admin
-      dashboard — any authenticated player (not just admins) lands on
-      `/schedule` instead of `/dashboard`. New `_player` route layout
-      gated on `requireAuthedPlayer` (not `requireAdminPlayer`).
-      `_auth`'s admin gate now redirects authenticated-but-non-admin
-      players to `/schedule` instead of bouncing them back to `/login`.
-- [x] Upcoming matches (full detail + rosters) + the player's own history.
-      `matches.listUpcomingForPlayer` (full roster/waitlist names — the
-      deliberate exception to the board's collapsed rosters, per
-      CLAUDE.md's board model: "one tap (or the web view) shows them") and
-      `matches.listMyHistory` (past matches the player had a live
-      membership in). Pages: `/schedule`, `/history`.
-
-**Also added this pass (not in original milestone scope, real gap found
-live):** board *edits* don't push Telegram notifications — only new
-messages do — so creating a match silently updated the board with no ping.
-Added `boardState.repostToGroup` (admin-gated mutation) + a `force` flag on
-`syncBoard` that deletes the old board message and posts a fresh one
-instead of editing in place, wired to an "Отправить в группу" button on
-the dashboard's match list. This is also exactly the mechanism Milestone 6
-needs, so that milestone is partially pre-built once group privacy mode is
-enabled.
-
-**Also did a full dashboard redesign pass this session:** stripped a
-custom teal/green padel-court palette back to shadcn's actual default
-neutral (pure grayscale, zero chroma) per explicit user request — strict
-monochrome, shadcn components only, consistent patterns. Installed
-`next-themes` with a light/dark/system toggle in both nav bars. Converted
-browser `confirm()` calls to `AlertDialog` and the inline guest-add form to
-a `Dialog`, for consistency with the rest of the shadcn-based UI.
-
-## Post-Milestone-9 feedback round (live user testing)
-
-A round of real usage surfaced several gaps, fixed together:
-
-- **Auth bug fixed:** an intermittent "Not authenticated" crash on admin/
-  player queries (e.g. `players:listAll`). Root cause: Convex+better-auth's
-  15-min JWT is refreshed via a `setTimeout` in the browser tab, which can
-  miss its window if the tab is backgrounded/throttled — a generic issue,
-  **not** caused by using Telegram auth (any sign-in method would hit the
-  same race; switching to password auth would not have fixed it and was
-  correctly not pursued). Fix: every admin/player query now degrades
-  gracefully (`.catch(() => null)`, matching `getCurrentPlayer`'s existing
-  pattern) instead of throwing — mutations are untouched and still throw
-  hard, since a failed write must surface to the user.
-- **Comprehensive notification coverage:** `cancelMatch`, non-reschedule
-  `editMatch` field changes, `removeMember`, `promoteFromWaitlist`, and a
-  roster-freeing `dropMatch` now all DM the affected player(s) — previously
-  only reschedule and capacity-increase did. The "details changed" DM
-  includes the actual before/after values per field (e.g. "Корт: A → B"),
-  not a vague "something changed" pointer elsewhere — the community lives
-  in Telegram, not the web dashboard, so messages need to be self-contained.
-- **Board: numbered pairing.** Telegram stacks all inline-keyboard buttons
-  in one block below the whole message — with several open matches, users
-  couldn't tell which "Записаться" button matched which match. Fixed by
-  prefixing both a match's text block and its button with the same ordinal
-  emoji (1️⃣2️⃣3️⃣…).
-- **Board: full rosters shown inline** (revisits the original "collapsed
-  rosters" locked decision in CLAUDE.md — explicit user call). Each
-  roster/waitlist member now appears one-per-line, as a clickable
-  `tg://user?id=` mention link (opens their Telegram profile — works even
-  without a public @username; guests render as plain text, no profile to
-  link). Board messages now send with `parse_mode: "HTML"`, so all
-  admin-entered free text (court/format/level) is HTML-escaped. Safety net
-  if this ever approaches the 4096-char cap: drop the link markup first
-  (shorter), then truncate — deliberately not splitting into multiple board
-  messages, since that reintroduces the exact burial problem collapsed
-  rosters existed to avoid.
-- **UI polish:** replaced every "Загрузка…" text loading state with shadcn
-  `Skeleton` components across all pages.
-
-## Milestone 10 — Hardening before prod
+## Milestone 9 — Hardening before prod
 
 - [ ] Point **prod** bot webhook at prod Convex.
 - [ ] Confirm bot admin rights in игры.

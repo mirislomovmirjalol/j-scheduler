@@ -14,30 +14,30 @@ import { Link, useRouter } from "@tanstack/react-router";
 import ThemeToggle from "@/components/theme-toggle";
 import { authClient } from "@/lib/auth-client";
 
-const links = [
-  { to: "/schedule", label: "Расписание" },
-  { to: "/history", label: "История" },
-] as const;
+const linkClassName =
+  "px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground [&.active]:bg-secondary [&.active]:text-foreground";
 
-export default function PlayerNav({ player }: { player: Doc<"players"> }) {
+export default function AppNav({ player }: { player: Doc<"players"> }) {
   const router = useRouter();
 
   return (
     <header className="flex items-center justify-between border-b px-4 py-3">
       <div className="flex items-center gap-6">
-        <Link to="/schedule" className="text-sm font-semibold tracking-tight">
+        <Link to="/matches" className="text-sm font-semibold tracking-tight">
           Игры
         </Link>
         <nav className="flex gap-1">
-          {links.map(({ to, label }) => (
-            <Link
-              key={to}
-              to={to}
-              className="px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground [&.active]:bg-secondary [&.active]:text-foreground"
-            >
-              {label}
+          <Link to="/matches" className={linkClassName}>
+            Матчи
+          </Link>
+          <Link to="/history" className={linkClassName}>
+            История
+          </Link>
+          {player.isAdmin && (
+            <Link to="/players" className={linkClassName}>
+              Игроки
             </Link>
-          ))}
+          )}
         </nav>
       </div>
 
@@ -55,14 +55,13 @@ export default function PlayerNav({ player }: { player: Doc<"players"> }) {
           <DropdownMenuContent align="end">
             <DropdownMenuGroup>
               <DropdownMenuLabel>
-                {player.username ? `@${player.username}` : "Профиль"}
+                {player.username
+                  ? `@${player.username}`
+                  : player.isAdmin
+                    ? "Администратор"
+                    : "Профиль"}
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {player.isAdmin && (
-                <DropdownMenuItem render={<Link to="/dashboard" />}>
-                  Панель администратора
-                </DropdownMenuItem>
-              )}
               <DropdownMenuItem
                 variant="destructive"
                 onClick={() => {

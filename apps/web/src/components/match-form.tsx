@@ -19,8 +19,6 @@ export type MatchFormValues = {
   lundaUrl: string;
 };
 
-const FORMATS = ["Американо", "Мексикано", "King"];
-
 export function defaultMatchFormValues(match?: {
   startsAt: number;
   durationMin?: number;
@@ -38,7 +36,7 @@ export function defaultMatchFormValues(match?: {
     description: match?.description ?? "",
     level: match?.level ?? "",
     court: match?.court ?? "",
-    format: match?.format ?? FORMATS[0],
+    format: match?.format ?? "",
     maxMembers: match ? String(match.maxMembers) : "8",
     pricePerPerson: match?.pricePerPerson ? String(match.pricePerPerson) : "",
     lundaUrl: match?.lundaUrl ?? "",
@@ -72,7 +70,9 @@ export default function MatchForm({
 }) {
   const [values, setValues] = useState(initialValues);
   const courtHistory = useQuery(api.matches.listCourtHistory);
-  const courtListId = useId();
+  const formatHistory = useQuery(api.matches.listFormatHistory);
+  const levelHistory = useQuery(api.matches.listLevelHistory);
+  const listId = useId();
 
   const set = <K extends keyof MatchFormValues>(key: K, value: MatchFormValues[K]) =>
     setValues((v) => ({ ...v, [key]: value }));
@@ -112,7 +112,6 @@ export default function MatchForm({
         <Label htmlFor="description">Описание</Label>
         <Input
           id="description"
-          required
           placeholder="Например: обычная еженедельная игра"
           value={values.description}
           onChange={(e) => set("description", e.target.value)}
@@ -125,11 +124,11 @@ export default function MatchForm({
           <Input
             id="court"
             required
-            list={courtListId}
+            list={`${listId}-court`}
             value={values.court}
             onChange={(e) => set("court", e.target.value)}
           />
-          <datalist id={courtListId}>
+          <datalist id={`${listId}-court`}>
             {courtHistory?.map((c) => <option key={c} value={c} />)}
           </datalist>
         </div>
@@ -138,14 +137,12 @@ export default function MatchForm({
           <Input
             id="format"
             required
-            list={`${courtListId}-format`}
+            list={`${listId}-format`}
             value={values.format}
             onChange={(e) => set("format", e.target.value)}
           />
-          <datalist id={`${courtListId}-format`}>
-            {FORMATS.map((f) => (
-              <option key={f} value={f} />
-            ))}
+          <datalist id={`${listId}-format`}>
+            {formatHistory?.map((f) => <option key={f} value={f} />)}
           </datalist>
         </div>
         <div className="flex flex-col gap-1.5">
@@ -154,9 +151,13 @@ export default function MatchForm({
             id="level"
             required
             placeholder="1-2"
+            list={`${listId}-level`}
             value={values.level}
             onChange={(e) => set("level", e.target.value)}
           />
+          <datalist id={`${listId}-level`}>
+            {levelHistory?.map((l) => <option key={l} value={l} />)}
+          </datalist>
         </div>
       </div>
 

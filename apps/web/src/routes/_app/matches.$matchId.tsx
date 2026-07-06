@@ -39,7 +39,7 @@ import { toast } from "sonner";
 
 import SeatMeter from "@/components/seat-meter";
 
-export const Route = createFileRoute("/_auth/matches/$matchId")({
+export const Route = createFileRoute("/_app/matches/$matchId")({
   component: MatchDetailPage,
 });
 
@@ -55,6 +55,7 @@ function formatDateTime(ms: number) {
 }
 
 function MatchDetailPage() {
+  const { player } = Route.useRouteContext();
   const { matchId } = Route.useParams();
   const detail = useQuery(api.matches.getMatchDetail, {
     matchId: matchId as Id<"matches">,
@@ -107,40 +108,42 @@ function MatchDetailPage() {
             </a>
           )}
         </div>
-        <div className="flex shrink-0 gap-2">
-          <Button
-            variant="outline"
-            render={<Link to="/matches/$matchId/edit" params={{ matchId: match._id }} />}
-          >
-            Редактировать
-          </Button>
-          <AlertDialog>
-            <AlertDialogTrigger render={<Button variant="destructive" />}>
-              Отменить
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Отменить эту игру?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Игра пропадёт с доски в группе. Это действие можно отменить только
-                  вручную через базу данных.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Назад</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={async () => {
-                    await cancelMatch({ matchId: match._id });
-                    toast.success("Игра отменена");
-                    navigate({ to: "/matches" });
-                  }}
-                >
-                  Отменить игру
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </div>
+        {player.isAdmin && (
+          <div className="flex shrink-0 gap-2">
+            <Button
+              variant="outline"
+              render={<Link to="/matches/$matchId/edit" params={{ matchId: match._id }} />}
+            >
+              Редактировать
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger render={<Button variant="destructive" />}>
+                Отменить
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Отменить эту игру?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Игра пропадёт с доски в группе. Это действие можно отменить только
+                    вручную через базу данных.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Назад</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={async () => {
+                      await cancelMatch({ matchId: match._id });
+                      toast.success("Игра отменена");
+                      navigate({ to: "/matches" });
+                    }}
+                  >
+                    Отменить игру
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        )}
       </div>
 
       <SeatMeter
@@ -154,6 +157,7 @@ function MatchDetailPage() {
         members={roster}
         emptyText="Пока никто не записался."
         showPromote={false}
+        showActions={player.isAdmin}
       />
 
       <MemberSection
@@ -161,9 +165,10 @@ function MatchDetailPage() {
         members={waitlist}
         emptyText="Лист ожидания пуст."
         showPromote
+        showActions={player.isAdmin}
       />
 
-      <AddGuestDialog matchId={match._id} />
+      {player.isAdmin && <AddGuestDialog matchId={match._id} />}
     </div>
   );
 }
@@ -173,11 +178,13 @@ function MemberSection({
   members,
   emptyText,
   showPromote,
+  showActions,
 }: {
   title: string;
   members: { membership: Doc<"memberships">; player: Doc<"players"> | null }[];
   emptyText: string;
   showPromote: boolean;
+  showActions: boolean;
 }) {
   const removeMember = useMutation(api.memberships.removeMember);
   const promoteFromWaitlist = useMutation(api.memberships.promoteFromWaitlist);
@@ -195,7 +202,7 @@ function MemberSection({
             <TableRow>
               <TableHead>Игрок</TableHead>
               <TableHead>Записан</TableHead>
-              <TableHead className="text-right">Действия</TableHead>
+              {showActions && <TableHead className="text-right">Действия</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -221,31 +228,50 @@ function MemberSection({
                     timeZone: "Asia/Tashkent",
                   })}
                 </TableCell>
-                <TableCell className="flex justify-end gap-2 text-right">
-                  {showPromote && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={async () => {
-                        try {
-                          await promoteFromWaitlist({ membershipId: membership._id });
-                          toast.success("Игрок переведён в ростер");
-                        } catch {
-                          toast.error("Мест нет");
-                        }
-                      }}
-                    >
-                      В ростер
-                    </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => removeMember({ membershipId: membership._id })}
-                  >
-                    Убрать
-                  </Button>
-                </TableCell>
+                {showActions && (
+                  <TableCell className="flex justify-end gap-2 text-right">
+                    {showPromote && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={async () => {
+                          try {
+                            await promoteFromWaitlist({ membershipId: membership._id });
+                            toast.success("Игрок переведён в ростер");
+                          } catch {
+                            toast.error("Мест нет");
+                          }
+                        }}
+                      >
+                        В ростер
+                      </Button>
+                    )}
+                    <AlertDialog>
+                      <AlertDialogTrigger render={<Button size="sm" variant="ghost" />}>
+                        Убрать
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>
+                            Убрать {player?.firstName ?? "игрока"}?
+                          </AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Игрок будет удалён из этой игры и получит уведомление в
+                            Telegram, если подписан на напоминания.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Назад</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => removeMember({ membershipId: membership._id })}
+                          >
+                            Убрать
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>

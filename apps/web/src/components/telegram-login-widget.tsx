@@ -35,7 +35,7 @@ export default function TelegramLoginWidget() {
           body: JSON.stringify(user),
         });
         if (!res.ok) throw new Error("verification failed");
-        window.location.href = "/dashboard";
+        window.location.href = "/matches";
       } catch {
         setStatus("error");
       }

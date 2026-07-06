@@ -168,8 +168,19 @@ export const listAll = query({
     // re-run rather than crash the page.
     const admin = await requireAdminPlayer(ctx).catch(() => null);
     if (!admin) return [];
-    const players = await ctx.db.query("players").take(500);
+    const players = await ctx.db.query("players").order("desc").take(500);
     return players.filter((p) => !p.isDeleted);
+  },
+});
+
+// Player profile page (admin-only lookup of any player).
+export const getById = query({
+  args: { playerId: v.id("players") },
+  handler: async (ctx, { playerId }) => {
+    if (!(await requireAdminPlayer(ctx).catch(() => null))) return null;
+    const player = await ctx.db.get("players", playerId);
+    if (!player || player.isDeleted) return null;
+    return player;
   },
 });
 

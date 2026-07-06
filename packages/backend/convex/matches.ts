@@ -6,6 +6,7 @@ import {
   mutation,
   query,
   type MutationCtx,
+  type QueryCtx,
 } from "./_generated/server";
 import { requireAdminPlayer, requireAuthedPlayer } from "./players";
 
@@ -312,48 +313,17 @@ export const listWaitlistPlayers = internalQuery({
   },
 });
 
-// Dashboard match list — every non-deleted match, soonest-first. Includes
-// past matches (unlike the board's listOpenWithRosterCounts) so admins can
-// review history.
-export const listUpcoming = query({
-  args: {},
-  handler: async (ctx) => {
-    // Graceful-degrade on a transient auth race (see players.listAll) —
-    // the reactive query self-heals once the client's token refreshes.
-    if (!(await requireAdminPlayer(ctx).catch(() => null))) return [];
-
-    const matches = await ctx.db
-      .query("matches")
-      .withIndex("by_isDeleted_startsAt", (q) => q.eq("isDeleted", false))
-      .order("asc")
-      .take(200);
-
-    return await Promise.all(
-      matches.map(async (match) => {
-        const memberships = await ctx.db
-          .query("memberships")
-          .withIndex("by_match", (q) => q.eq("matchId", match._id))
-          .take(400);
-        const live = memberships.filter((m) => !m.isDeleted);
-        return {
-          ...match,
-          rosterCount: live.filter((m) => m.role === "roster").length,
-          waitlistCount: live.filter((m) => m.role === "waitlist").length,
-        };
-      }),
-    );
-  },
-});
-
 // Match detail page: the match plus full roster/waitlist with player info
-// and membership metadata (joinedAt, addedBy) for admin management.
+// and membership metadata (joinedAt, addedBy). Any authenticated player can
+// view this (the unified matches view) — admin-only actions are gated
+// separately at the mutation level (cancelMatch, removeMember, etc.).
 export const getMatchDetail = query({
   args: { matchId: v.id("matches") },
   handler: async (ctx, { matchId }) => {
     // Graceful-degrade on a transient auth race (see players.listAll) —
     // already returns T | null, so a failed check just looks like "not
     // found" for a moment until the query self-heals.
-    if (!(await requireAdminPlayer(ctx).catch(() => null))) return null;
+    if (!(await requireAuthedPlayer(ctx).catch(() => null))) return null;
 
     const match = await ctx.db.get("matches", matchId);
     if (!match) return null;
@@ -459,17 +429,64 @@ export const listMyHistory = query({
   },
 });
 
-// Distinct courts from recent matches, for the dashboard's court field
-// autocomplete — no venue table in v1 (CLAUDE.md §7).
+// Distinct court/format/level values from recent matches, for the match
+// form's autocomplete — database-backed (not the browser's own autofill),
+// so a value entered on one device suggests on any other. No venue table
+// in v1 (CLAUDE.md §7).
+async function distinctFieldValues(
+  ctx: QueryCtx,
+  field: "court" | "format" | "level",
+) {
+  if (!(await requireAdminPlayer(ctx).catch(() => null))) return [];
+  const matches = await ctx.db.query("matches").order("desc").take(200);
+  return [...new Set(matches.map((m) => m[field]))];
+}
+
 export const listCourtHistory = query({
   args: {},
-  handler: async (ctx) => {
+  handler: (ctx) => distinctFieldValues(ctx, "court"),
+});
+
+export const listFormatHistory = query({
+  args: {},
+  handler: (ctx) => distinctFieldValues(ctx, "format"),
+});
+
+export const listLevelHistory = query({
+  args: {},
+  handler: (ctx) => distinctFieldValues(ctx, "level"),
+});
+
+// A specific player's match history — same shape as listMyHistory, but for
+// an admin looking up any player (the dedicated player profile page).
+export const listHistoryForPlayer = query({
+  args: { playerId: v.id("players") },
+  handler: async (ctx, { playerId }) => {
     // Graceful-degrade on a transient auth race (see players.listAll).
     if (!(await requireAdminPlayer(ctx).catch(() => null))) return [];
-    const matches = await ctx.db
-      .query("matches")
-      .order("desc")
+
+    const memberships = await ctx.db
+      .query("memberships")
+      .withIndex("by_player", (q) => q.eq("playerId", playerId))
       .take(200);
-    return [...new Set(matches.map((m) => m.court))];
+
+    const now = Date.now();
+    const withMatch = await Promise.all(
+      memberships
+        .filter((m) => !m.isDeleted)
+        .map(async (m) => {
+          const match = await ctx.db.get("matches", m.matchId);
+          return { membership: m, match };
+        }),
+    );
+
+    const past: { membership: Doc<"memberships">; match: Doc<"matches"> }[] = [];
+    for (const row of withMatch) {
+      if (row.match && !row.match.isDeleted && row.match.startsAt < now) {
+        past.push({ membership: row.membership, match: row.match });
+      }
+    }
+
+    return past.sort((a, b) => b.match.startsAt - a.match.startsAt);
   },
 });

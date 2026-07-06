@@ -1,7 +1,7 @@
 import { api } from "@J-schedule/backend/convex/_generated/api";
 import type { Id } from "@J-schedule/backend/convex/_generated/dataModel";
 import { Skeleton } from "@J-schedule/ui/components/skeleton";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -11,7 +11,10 @@ import MatchForm, {
   matchFormValuesToArgs,
 } from "@/components/match-form";
 
-export const Route = createFileRoute("/_auth/matches_/$matchId/edit")({
+export const Route = createFileRoute("/_app/matches_/$matchId/edit")({
+  beforeLoad: ({ context }) => {
+    if (!context.player.isAdmin) throw redirect({ to: "/matches" });
+  },
   component: EditMatchPage,
 });
 

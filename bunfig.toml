@@ -1,2 +1,7 @@
 [install]
-linker = "isolated"
+# "hoisted" (flat, npm/yarn-classic-style node_modules) instead of the
+# default "isolated" (.bun symlink store) — Vercel's Node dependency
+# tracer for serverless functions can't resolve the isolated layout,
+# causing "Cannot find module" errors for bare imports like "react" in
+# deployed functions.
+linker = "hoisted"
