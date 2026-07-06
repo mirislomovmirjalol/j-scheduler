@@ -6,21 +6,25 @@ import { components } from "./_generated/api";
 import type { DataModel } from "./_generated/dataModel";
 import { query } from "./_generated/server";
 import authConfig from "./auth.config";
+import { telegramWidgetLogin } from "./auth/telegramPlugin";
 
 const siteUrl = process.env.SITE_URL!;
+// Dev-only escape hatch: a tunnel URL (ngrok/cloudflared/localhost.run) for
+// testing the Telegram Login Widget, which requires a public HTTPS domain.
+// Unset in prod.
+const extraTrustedOrigin = process.env.EXTRA_TRUSTED_ORIGIN;
 
 export const authComponent = createClient<DataModel>(components.betterAuth);
 
 function createAuth(ctx: GenericCtx<DataModel>) {
   return betterAuth({
     baseURL: siteUrl,
-    trustedOrigins: [siteUrl],
+    trustedOrigins: extraTrustedOrigin ? [siteUrl, extraTrustedOrigin] : [siteUrl],
     database: authComponent.adapter(ctx),
-    emailAndPassword: {
-      enabled: true,
-      requireEmailVerification: false,
-    },
+    // No email/password (CLAUDE.md: Telegram Login Widget only, no
+    // passwords) — telegramWidgetLogin() below is the only sign-in method.
     plugins: [
+      telegramWidgetLogin(ctx),
       convex({
         authConfig,
         jwksRotateOnTokenGenerationError: true,

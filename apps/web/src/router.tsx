@@ -29,7 +29,11 @@ export function getRouter() {
     routeTree,
     defaultPreload: "intent",
     defaultPendingComponent: () => <Loader />,
-    defaultNotFoundComponent: () => <div>Not Found</div>,
+    defaultNotFoundComponent: () => (
+      <div className="flex h-full items-center justify-center text-muted-foreground">
+        Страница не найдена
+      </div>
+    ),
     context: { queryClient, convexQueryClient },
   });
 

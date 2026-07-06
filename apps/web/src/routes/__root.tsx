@@ -9,13 +9,11 @@ import {
   createRootRouteWithContext,
   useRouteContext,
 } from "@tanstack/react-router";
-import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import { createServerFn } from "@tanstack/react-start";
 
+import { ThemeProvider } from "@/components/theme-provider";
 import { authClient } from "@/lib/auth-client";
 import { getToken } from "@/lib/auth-server";
-
-import Header from "../components/header";
 
 import appCss from "../index.css?url";
 
@@ -39,10 +37,20 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
         content: "width=device-width, initial-scale=1",
       },
       {
-        title: "My App",
+        title: "Игры — панель организатора",
       },
     ],
     links: [
+      { rel: "preconnect", href: "https://fonts.googleapis.com" },
+      {
+        rel: "preconnect",
+        href: "https://fonts.gstatic.com",
+        crossOrigin: "anonymous",
+      },
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap",
+      },
       {
         rel: "stylesheet",
         href: appCss,
@@ -71,17 +79,15 @@ function RootDocument() {
       authClient={authClient}
       initialToken={context.token}
     >
-      <html lang="en" className="dark">
+      <html lang="ru" suppressHydrationWarning>
         <head>
           <HeadContent />
         </head>
-        <body>
-          <div className="grid h-svh grid-rows-[auto_1fr]">
-            <Header />
+        <body className="h-svh">
+          <ThemeProvider>
             <Outlet />
-          </div>
-          <Toaster richColors />
-          <TanStackRouterDevtools position="bottom-left" />
+            <Toaster richColors />
+          </ThemeProvider>
           <Scripts />
         </body>
       </html>

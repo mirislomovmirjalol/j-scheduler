@@ -11,6 +11,7 @@ export const env = createEnv({
   client: {
     VITE_CONVEX_URL: convexUrlSchema("example.convex.cloud"),
     VITE_CONVEX_SITE_URL: convexUrlSchema("example.convex.site"),
+    VITE_TELEGRAM_BOT_USERNAME: z.string().min(1),
   },
   runtimeEnv: (import.meta as any).env,
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,
