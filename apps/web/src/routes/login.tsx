@@ -9,7 +9,7 @@ import {
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 
-import TelegramLoginWidget from "@/components/telegram-login-widget";
+import TelegramLogin from "@/components/telegram-login";
 import { fetchAuthQuery } from "@/lib/auth-server";
 
 const getCurrentPlayer = createServerFn({ method: "GET" }).handler(async () => {
@@ -40,7 +40,7 @@ function LoginPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center gap-4">
-          <TelegramLoginWidget />
+          <TelegramLogin />
         </CardContent>
       </Card>
     </div>

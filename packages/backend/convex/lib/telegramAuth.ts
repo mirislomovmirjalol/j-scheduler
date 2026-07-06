@@ -1,22 +1,13 @@
-// Verifies data from the Telegram Login Widget (legacy HMAC scheme —
-// https://core.telegram.org/widgets/login-legacy). This project's bot has no
-// "Web Login" OIDC registration in @BotFather, so this is the only option
-// available without extra bot configuration.
-//
-// Algorithm: secret_key = SHA256(bot_token); data-check-string = every field
-// except `hash`, sorted alphabetically as "key=value" lines joined by "\n";
-// the received hash must equal HMAC-SHA256(data-check-string, secret_key)
-// hex-encoded.
+// Shared HMAC helpers for verifying Telegram-signed payloads. Used by the
+// Mini App initData verification below (see its comment for the exact
+// algorithm — the Telegram Login Widget this project originally used had a
+// *different* secret-key derivation, but the widget was removed entirely in
+// favor of the Mini App + deep-link login methods).
 
-async function sha256(data: string): Promise<Uint8Array> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(data) as BufferSource,
-  );
-  return new Uint8Array(digest);
-}
-
-async function hmacSha256Hex(key: Uint8Array, message: string): Promise<string> {
+async function hmacSha256Raw(
+  key: Uint8Array,
+  message: string,
+): Promise<Uint8Array> {
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
     key as BufferSource,
@@ -29,42 +20,75 @@ async function hmacSha256Hex(key: Uint8Array, message: string): Promise<string> 
     cryptoKey,
     new TextEncoder().encode(message) as BufferSource,
   );
-  return Array.from(new Uint8Array(signature))
+  return new Uint8Array(signature);
+}
+
+async function hmacSha256Hex(key: Uint8Array, message: string): Promise<string> {
+  const raw = await hmacSha256Raw(key, message);
+  return Array.from(raw)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
 
-export type TelegramWidgetAuth = {
+// Telegram's own recommendation: reject stale auth payloads (replay
+// protection). 1 day is a generous but standard window.
+export function isAuthDateFresh(authDate: number, maxAgeSec = 86400): boolean {
+  return Date.now() / 1000 - authDate <= maxAgeSec;
+}
+
+// Verifies Telegram Mini App initData (https://core.telegram.org/bots/webapps
+// #validating-data-received-via-the-mini-app). A *different* HMAC scheme from
+// the Login Widget above, despite the similar shape: here the secret key is
+// itself an HMAC — secret_key = HMAC-SHA256(botToken, key="WebAppData") — as
+// opposed to the widget's secret_key = SHA256(botToken). Mini Apps hand this
+// string to the page automatically via window.Telegram.WebApp.initData the
+// moment it's opened from within Telegram — no user action, no popups, no
+// BotFather domain registration, which sidesteps every reliability problem
+// the widget had. Only usable when the app is actually opened as a
+// registered Mini App, so it's a progressive enhancement over the deep-link
+// flow (webLogin.ts), not a replacement for it.
+export type TelegramMiniAppUser = {
   id: number;
   first_name: string;
   last_name?: string;
   username?: string;
   photo_url?: string;
-  auth_date: number;
-  hash: string;
 };
 
-export async function verifyTelegramWidgetAuth(
-  data: TelegramWidgetAuth,
+export async function verifyTelegramMiniAppInitData(
+  initData: string,
   botToken: string,
-): Promise<boolean> {
-  const { hash, ...fields } = data;
-  if (!hash) return false;
+): Promise<
+  | { valid: true; user: TelegramMiniAppUser; authDate: number }
+  | { valid: false }
+> {
+  const params = new URLSearchParams(initData);
+  const hash = params.get("hash");
+  if (!hash) return { valid: false };
+  params.delete("hash");
 
-  const checkString = Object.entries(fields)
-    .filter(([, value]) => value !== undefined && value !== null)
+  const checkString = [...params.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, value]) => `${key}=${value}`)
     .join("\n");
 
-  const secretKey = await sha256(botToken);
+  const secretKey = await hmacSha256Raw(
+    new TextEncoder().encode("WebAppData"),
+    botToken,
+  );
   const computedHash = await hmacSha256Hex(secretKey, checkString);
+  if (computedHash !== hash) return { valid: false };
 
-  return computedHash === hash;
-}
+  const userJson = params.get("user");
+  const authDateStr = params.get("auth_date");
+  if (!userJson || !authDateStr) return { valid: false };
 
-// Telegram's own recommendation: reject stale auth payloads (replay
-// protection). 1 day is a generous but standard window for this widget.
-export function isAuthDateFresh(authDate: number, maxAgeSec = 86400): boolean {
-  return Date.now() / 1000 - authDate <= maxAgeSec;
+  let user: TelegramMiniAppUser;
+  try {
+    user = JSON.parse(userJson);
+  } catch {
+    return { valid: false };
+  }
+
+  return { valid: true, user, authDate: Number(authDateStr) };
 }

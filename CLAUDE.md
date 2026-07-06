@@ -29,7 +29,7 @@ on top.
 | Backend / DB     | **Convex**                | Reactive DB, mutations/queries, `httpAction` webhook, cron + scheduler. No separate server. |
 | Styling          | **Tailwind CSS**          | Utility-first. Keep design tokens centralized.              |
 | Messaging        | **Telegram Bot API**      | Webhook-driven (not long polling).                          |
-| Auth             | **Telegram Login Widget** | Maps a web user to their `telegramUserId`. No new passwords. |
+| Auth             | **Telegram Mini App + deep-link fallback** | Maps a web user to their `telegramUserId`. No new passwords. Opened as a registered Mini App → instant sign-in via `initData`; opened in a regular browser → a one-time code confirmed through the bot's own webhook. Replaced the original Telegram Login Widget (BotFather domain registration, unreliable popup/session behavior). |
 | Language (UI)    | **Russian**               | All user-facing strings are Russian. Code/comments English. |
 
 There is **no separate backend server**. The Telegram webhook is a Convex

@@ -155,4 +155,29 @@ export default defineSchema({
     updateId: v.number(),
     processedAt: v.number(),
   }).index("by_updateId", ["updateId"]),
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // WEB LOGIN REQUESTS — deep-link alternative to the Telegram Login Widget.
+  // The widget requires BotFather domain registration and has real-world
+  // reliability issues (browser popup blockers, "not logged into
+  // web.telegram.org" fallback flows that silently stall). This flow instead
+  // rides on the bot's own webhook: the web app generates a one-time code,
+  // the user opens t.me/<bot>?start=<code> and taps Start, the webhook
+  // confirms the code, and the web app (reactively watching status) then
+  // exchanges the confirmed code for a session. "confirmed" -> "used" is a
+  // one-way, one-time transition to prevent replay.
+  // ─────────────────────────────────────────────────────────────────────────
+  webLoginRequests: defineTable({
+    code: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("confirmed"),
+      v.literal("used"),
+    ),
+    telegramUserId: v.optional(v.number()),
+    firstName: v.optional(v.string()),
+    lastName: v.optional(v.string()),
+    username: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index("by_code", ["code"]),
 });

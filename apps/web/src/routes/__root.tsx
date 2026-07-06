@@ -40,6 +40,12 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
         title: "Игры — панель организатора",
       },
     ],
+    scripts: [
+      // No-op outside Telegram; when opened as a registered Mini App, this
+      // populates window.Telegram.WebApp with initData for auto sign-in
+      // (see components/telegram-login.tsx).
+      { src: "https://telegram.org/js/telegram-web-app.js" },
+    ],
     links: [
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       {

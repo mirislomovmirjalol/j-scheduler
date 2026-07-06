@@ -6,6 +6,7 @@ export const strings = {
   dmWelcome:
     "Привет! Теперь тебе будут приходить напоминания об играх в личку.",
   dmAlreadySubscribed: "Ты уже подписан(-а) на напоминания 👍",
+  webLoginConfirmed: "✅ Вход подтверждён — вернись на сайт.",
   matchRescheduled: (newDateTime: string) =>
     `⏰ Время игры изменилось: теперь ${newDateTime}.`,
   joinedRoster: "Ты в игре! ✅",

@@ -23,6 +23,27 @@ export const handleMessage = internalAction({
           username: from.username ?? undefined,
         },
       );
+
+      // "/start <code>" — a deep-link login confirmation (see webLogin.ts).
+      // Runs independently of, and in addition to, the DM opt-in above.
+      const deepLinkCode = text.slice("/start".length).trim();
+      if (deepLinkCode) {
+        const result = await ctx.runMutation(internal.webLogin.confirm, {
+          code: deepLinkCode,
+          telegramUserId: from.id,
+          firstName: from.first_name ?? "",
+          lastName: from.last_name ?? undefined,
+          username: from.username ?? undefined,
+        });
+        if (result.ok) {
+          await callTelegramApi("sendMessage", {
+            chat_id: chat.id,
+            text: strings.webLoginConfirmed,
+          });
+          return;
+        }
+      }
+
       await callTelegramApi("sendMessage", {
         chat_id: chat.id,
         text: alreadySubscribed

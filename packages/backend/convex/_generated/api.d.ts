@@ -9,7 +9,9 @@
  */
 
 import type * as auth from "../auth.js";
-import type * as auth_telegramPlugin from "../auth/telegramPlugin.js";
+import type * as auth_signInHelpers from "../auth/signInHelpers.js";
+import type * as auth_telegramDeepLinkPlugin from "../auth/telegramDeepLinkPlugin.js";
+import type * as auth_telegramMiniAppPlugin from "../auth/telegramMiniAppPlugin.js";
 import type * as boardState from "../boardState.js";
 import type * as crons from "../crons.js";
 import type * as http from "../http.js";
@@ -30,6 +32,7 @@ import type * as telegram_reminders from "../telegram/reminders.js";
 import type * as telegram_router from "../telegram/router.js";
 import type * as telegram_setWebhook from "../telegram/setWebhook.js";
 import type * as telegram_webhook from "../telegram/webhook.js";
+import type * as webLogin from "../webLogin.js";
 
 import type {
   ApiFromModules,
@@ -39,7 +42,9 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
-  "auth/telegramPlugin": typeof auth_telegramPlugin;
+  "auth/signInHelpers": typeof auth_signInHelpers;
+  "auth/telegramDeepLinkPlugin": typeof auth_telegramDeepLinkPlugin;
+  "auth/telegramMiniAppPlugin": typeof auth_telegramMiniAppPlugin;
   boardState: typeof boardState;
   crons: typeof crons;
   http: typeof http;
@@ -60,6 +65,7 @@ declare const fullApi: ApiFromModules<{
   "telegram/router": typeof telegram_router;
   "telegram/setWebhook": typeof telegram_setWebhook;
   "telegram/webhook": typeof telegram_webhook;
+  webLogin: typeof webLogin;
 }>;
 
 /**

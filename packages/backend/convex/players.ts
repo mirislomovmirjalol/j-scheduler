@@ -96,12 +96,12 @@ export const setWantsDms = internalMutation({
   },
 });
 
-// Called directly from the telegram-widget-login plugin endpoint (auth/
-// telegramPlugin.ts), right after better-auth resolves/creates a user for a
-// verified Telegram Login Widget sign-in. Links (or creates) the player row
-// for that Telegram id to the better-auth user, so
-// ctx.auth.getUserIdentity() can resolve back to a player on every later
-// dashboard request. Runs on every login (not just first), so it also
+// Called from signInAsTelegramUser (auth/signInHelpers.ts), shared by every
+// Telegram sign-in method's endpoint (deep-link, Mini App), right after
+// better-auth resolves/creates a user for a verified Telegram identity.
+// Links (or creates) the player row for that Telegram id to the better-auth
+// user, so ctx.auth.getUserIdentity() can resolve back to a player on every
+// later dashboard request. Runs on every login (not just first), so it also
 // refreshes display info.
 export const upsertFromAuthUser = internalMutation({
   args: {
