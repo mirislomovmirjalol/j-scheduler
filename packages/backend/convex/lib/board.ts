@@ -116,11 +116,14 @@ export function renderBoard(
     }
     lines.push("");
 
+    // "Записаться" repeated on every button (differing only by the count in
+    // parentheses) told the user nothing about which match a given button
+    // was for without cross-checking the marker against the text above.
+    // The marker + date/time + seat count identifies the match directly;
+    // the waitlist hourglass is the only remaining state indicator needed.
     buttons.push([
       {
-        text: isFull
-          ? `${marker} В лист ожидания (${match.rosterCount}/${match.maxMembers})`
-          : `${marker} Записаться (${match.rosterCount}/${match.maxMembers})`,
+        text: `${marker} ${title}${isFull ? " ⏳" : ""} · ${match.rosterCount}/${match.maxMembers}`,
         callback_data: `join:${match._id}`,
       },
     ]);
