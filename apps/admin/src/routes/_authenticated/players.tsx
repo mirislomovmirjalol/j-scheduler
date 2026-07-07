@@ -28,6 +28,8 @@ import { createFileRoute, Link, Navigate } from "@tanstack/react-router"
 import { useMutation, useQuery } from "convex/react"
 import { useState } from "react"
 
+import StatCard from "@/components/stat-card"
+
 import { useAdminGuard } from "@/lib/use-admin-guard"
 
 export const Route = createFileRoute("/_authenticated/players")({
@@ -59,6 +61,17 @@ function PlayersPage() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
       <h1 className="text-2xl font-semibold tracking-tight">Игроки</h1>
+
+      {players && players.length > 0 && (
+        <div className="grid grid-cols-3 gap-3">
+          <StatCard label="Всего игроков" value={players.length} />
+          <StatCard label="Админов" value={players.filter((p) => p.isAdmin).length} />
+          <StatCard
+            label="Гостей"
+            value={players.filter((p) => p.type === "guest").length}
+          />
+        </div>
+      )}
 
       {players === undefined ? (
         <div className="flex flex-col gap-3">

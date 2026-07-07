@@ -6,6 +6,7 @@ import { Skeleton } from "@J-schedule/ui/components/skeleton"
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "convex/react"
 
+import StatCard from "@/components/stat-card"
 import { formatTashkentDateTime } from "@/lib/format"
 
 export const Route = createFileRoute("/_authenticated/history")({
@@ -18,6 +19,20 @@ function HistoryPage() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
       <h1 className="text-2xl font-semibold tracking-tight">Моя история</h1>
+
+      {history && history.length > 0 && (
+        <div className="grid grid-cols-3 gap-3">
+          <StatCard label="Сыграно игр" value={history.length} />
+          <StatCard
+            label="В ростере"
+            value={history.filter((h) => h.membership.role === "roster").length}
+          />
+          <StatCard
+            label="В листе ожидания"
+            value={history.filter((h) => h.membership.role === "waitlist").length}
+          />
+        </div>
+      )}
 
       {history === undefined ? (
         <div className="flex flex-col gap-2">

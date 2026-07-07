@@ -9,6 +9,7 @@ import { useMutation, useQuery } from "convex/react"
 import { useState } from "react"
 import { toast } from "sonner"
 
+import StatCard from "@/components/stat-card"
 import { formatTashkentDateTime } from "@/lib/format"
 
 export const Route = createFileRoute("/_authenticated/matches")({
@@ -56,6 +57,30 @@ function MatchesList() {
           </div>
         )}
       </div>
+
+      {matches && matches.length > 0 && (
+        <div className="grid grid-cols-3 gap-3">
+          <StatCard label="Предстоящих игр" value={matches.length} />
+          <StatCard
+            label="Свободных мест"
+            value={matches.reduce(
+              (sum, { match, roster }) => sum + Math.max(match.maxMembers - roster.length, 0),
+              0,
+            )}
+          />
+          <StatCard
+            label="Заполненность"
+            value={`${Math.round(
+              (matches.reduce((sum, { roster }) => sum + roster.length, 0) /
+                Math.max(
+                  matches.reduce((sum, { match }) => sum + match.maxMembers, 0),
+                  1,
+                )) *
+                100,
+            )}%`}
+          />
+        </div>
+      )}
 
       {matches === undefined ? (
         <div className="flex flex-col gap-4">

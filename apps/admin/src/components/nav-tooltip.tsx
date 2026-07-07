@@ -4,7 +4,7 @@
 // on the desktop left rail — matching the icon's own transform-origin so
 // it visibly grows out from the trigger rather than fading in from nowhere.
 export const navIconButtonClassName =
-  "group relative flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-[background-color,color,transform] duration-150 ease-out hover:text-foreground active:scale-90 [&.active]:bg-secondary [&.active]:text-foreground aria-expanded:bg-secondary aria-expanded:text-foreground"
+  "group relative flex size-11 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-[background-color,color,transform] duration-150 ease-out hover:text-foreground active:scale-90 [&.active]:bg-secondary [&.active]:text-foreground aria-expanded:bg-secondary aria-expanded:text-foreground"
 
 export function NavTooltip({ label }: { label: string }) {
   return (
