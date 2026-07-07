@@ -32,3 +32,14 @@
   box-shadow: none;
   border: 1px solid var(--border);
 }
+
+/* The drawer's own classes hard-code rounded-none on its swipe-down variant
+   (scoped via a data-swipe-direction attribute selector, same specificity
+   as this one — wins on source order, same mechanism as the rest of this
+   file). Only the top corners are visible on a bottom sheet; the sheet
+   (full-height side panel, flush on three edges) has no corner to round in
+   the first place, so it's left alone. */
+[data-slot="drawer-content"] {
+  border-top-left-radius: var(--radius-xl);
+  border-top-right-radius: var(--radius-xl);
+}

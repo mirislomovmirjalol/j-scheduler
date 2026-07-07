@@ -37,6 +37,31 @@ export function parseMatchesSearch(search: Record<string, unknown>): MatchesSear
   }
 }
 
+// The filter fields a user actually sets from the panel — deliberately
+// excludes `sort` and `mine`, which aren't "filters" in the reset-button
+// sense (sort always has a value, and `mine` is set by the dashboard's
+// "Мои игры" link, not a panel control).
+const FILTER_KEYS = [
+  "court",
+  "format",
+  "level",
+  "minOpenSeats",
+  "status",
+  "from",
+  "to",
+] as const satisfies readonly (keyof MatchesSearch)[]
+
+export function countActiveMatchesFilters(search: MatchesSearch): number {
+  return FILTER_KEYS.filter((key) => search[key] != null).length
+}
+
+export function clearedMatchesFilters(): Pick<MatchesSearch, (typeof FILTER_KEYS)[number]> {
+  return Object.fromEntries(FILTER_KEYS.map((key) => [key, undefined])) as Record<
+    (typeof FILTER_KEYS)[number],
+    undefined
+  >
+}
+
 export type MatchListEntry = {
   match: Doc<"matches">
   roster: { player: Doc<"players"> | null }[]

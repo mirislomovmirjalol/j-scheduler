@@ -9,7 +9,7 @@ import { useMutation, useQuery } from "convex/react"
 import { useState } from "react"
 import { toast } from "sonner"
 
-import MatchesFilterBar from "@/components/matches-filter-bar"
+import MatchesFilterPanel from "@/components/matches-filter-panel"
 import StatCard from "@/components/stat-card"
 import { formatTashkentDateTime } from "@/lib/format"
 import { applyMatchesFilters, parseMatchesSearch } from "@/lib/matches-filters"
@@ -94,7 +94,7 @@ function MatchesList() {
       )}
 
       {matches && matches.length > 0 && (
-        <MatchesFilterBar
+        <MatchesFilterPanel
           courts={[...new Set(matches.map((m) => m.match.court))].sort()}
           formats={[...new Set(matches.map((m) => m.match.format))].sort()}
           levels={[...new Set(matches.map((m) => m.match.level))].sort()}
