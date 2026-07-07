@@ -1,6 +1,22 @@
 // Mirrors convex/lib/time.ts's fromTashkent — Tashkent is a fixed UTC+5
 // offset (no DST), so this stays in sync with the backend's own logic.
 const TASHKENT_OFFSET_MS = 5 * 60 * 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000
+
+// An integer that increases by exactly 1 per Tashkent calendar day — a
+// stable bucketing key for grouping matches by day (e.g. the dashboard's
+// calendar heatmap) regardless of what time of day they start.
+export function tashkentDayIndex(ms: number): number {
+  return Math.floor((ms + TASHKENT_OFFSET_MS) / DAY_MS)
+}
+
+// Inverse of tashkentDayIndex: a Date whose UTC getters (getUTCFullYear,
+// getUTCMonth, getUTCDate, getUTCDay) read as that day's Tashkent-local
+// calendar fields — same "shift, then read as UTC" trick as
+// epochMsToTashkentLocal, just at day granularity.
+export function tashkentDayIndexToDate(dayIndex: number): Date {
+  return new Date(dayIndex * DAY_MS)
+}
 
 // Parses a <input type="datetime-local"> value ("YYYY-MM-DDTHH:mm"),
 // interpreted as Tashkent local time, into UTC epoch ms for storage.

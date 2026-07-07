@@ -504,6 +504,44 @@ export const listLevelHistory = query({
   handler: (ctx) => distinctFieldValues(ctx, "level"),
 });
 
+// Admin dashboard calendar heatmap + trend charts — every non-deleted match
+// (past or future) with its roster headcount, so the client can bucket by
+// day (a day with several tournaments sums to one heatmap cell) and by
+// week/month for the trend charts. Bounded take(); a community-scale
+// history fits comfortably under this without needing pagination yet.
+export const listAllForCalendar = query({
+  args: {},
+  handler: async (ctx) => {
+    if (!(await requireAdminPlayer(ctx).catch(() => null))) return [];
+
+    const matches = await ctx.db
+      .query("matches")
+      .withIndex("by_isDeleted_startsAt", (q) => q.eq("isDeleted", false))
+      .order("desc")
+      .take(500);
+
+    return await Promise.all(
+      matches.map(async (match) => {
+        const roster = await ctx.db
+          .query("memberships")
+          .withIndex("by_match_and_role", (q) =>
+            q.eq("matchId", match._id).eq("role", "roster"),
+          )
+          .take(200);
+
+        return {
+          matchId: match._id,
+          startsAt: match.startsAt,
+          court: match.court,
+          format: match.format,
+          maxMembers: match.maxMembers,
+          rosterCount: roster.filter((m) => !m.isDeleted).length,
+        };
+      }),
+    );
+  },
+});
+
 // A specific player's match history — same shape as listMyHistory, but for
 // an admin looking up any player (the dedicated player profile page).
 export const listHistoryForPlayer = query({

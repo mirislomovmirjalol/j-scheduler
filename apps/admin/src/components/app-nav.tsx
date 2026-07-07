@@ -27,7 +27,7 @@ import ThemeToggle from "@/components/theme-toggle"
 import { authClient } from "@/lib/auth-client"
 
 const navShapeClassName =
-  "fixed inset-x-0 top-3 z-50 mx-auto flex w-fit flex-row items-center gap-1 rounded-2xl sm:inset-x-auto sm:top-1/2 sm:left-4 sm:mx-0 sm:-translate-y-1/2 sm:flex-col"
+  "fixed inset-x-0 top-3 z-50 mx-auto flex w-fit flex-row items-center gap-1 rounded-full sm:inset-x-auto sm:top-1/2 sm:left-4 sm:mx-0 sm:-translate-y-1/2 sm:flex-col"
 
 export default function AppNav() {
   const player = useQuery(api.players.getCurrentPlayer)
@@ -35,15 +35,15 @@ export default function AppNav() {
 
   return (
     <nav className={navShapeClassName}>
-      <div className="absolute inset-0 rounded-2xl">
+      <div className="absolute inset-0 rounded-full">
         <BorderBeam
           size="pulse-inner"
           colorVariant="mono"
           strength={0.42}
-          className="size-full rounded-2xl border border-border/90 bg-background/40 shadow-lg backdrop-blur-xl"
+          className="size-full rounded-full border border-border/90 bg-background/40 shadow-lg backdrop-blur-xl"
           aria-hidden="true"
         >
-          <div className="size-full rounded-2xl" />
+          <div className="size-full rounded-full" />
         </BorderBeam>
       </div>
 

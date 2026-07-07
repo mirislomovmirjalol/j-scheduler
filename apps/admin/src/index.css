@@ -1,1 +1,24 @@
 @import "@J-schedule/ui/globals.css";
+
+/* packages/ui's shared components are deliberately sharp (rounded-none) —
+   that's shared with apps/web, so it stays as-is there. apps/admin wants a
+   softer feel without forking the shared kit: override by data-slot here,
+   after the import, so these win the cascade at equal specificity with no
+   !important needed. --radius-* are the same tokens globals.css already
+   derives from --radius, just not applied to these slots there. */
+[data-slot="button"],
+[data-slot="input"],
+[data-slot="checkbox"],
+[data-slot="badge"],
+[data-slot="skeleton"] {
+  border-radius: var(--radius-md);
+}
+
+[data-slot="card"],
+[data-slot="dialog-content"],
+[data-slot="alert-dialog-content"],
+[data-slot="empty"],
+[data-slot="empty-icon"],
+[data-slot="table-container"] {
+  border-radius: var(--radius-xl);
+}
