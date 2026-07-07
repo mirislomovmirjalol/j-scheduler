@@ -61,6 +61,7 @@ function HomePage() {
               label="Админов"
               value={players?.filter((p) => p.isAdmin).length ?? "—"}
               to="/players"
+              search={{ role: "admin" }}
             />
           </>
         )}

@@ -6,7 +6,16 @@
    after the import, so these win the cascade at equal specificity with no
    !important needed. --radius-* are the same tokens globals.css already
    derives from --radius, just not applied to these slots there. */
-[data-slot="button"],
+/* Buttons are matched by .group\/button (buttonVariants' own base class),
+   not [data-slot="button"]: base-ui's render-prop composition lets a
+   wrapping trigger (DialogClose, SheetClose, AlertDialogAction/Cancel/
+   Trigger) win the data-slot attribute over Button's own "button" value —
+   see mergeProps' "external/rightmost props win" rule — so a plain
+   attribute selector silently misses every wrapped trigger button and
+   leaves it flat while standalone buttons turn out rounded. The className
+   is merged (concatenated), not overwritten, so the base class always
+   survives regardless of what wraps it. */
+.group\/button,
 [data-slot="input"],
 [data-slot="checkbox"],
 [data-slot="badge"],
@@ -42,4 +51,11 @@
 [data-slot="drawer-content"] {
   border-top-left-radius: var(--radius-xl);
   border-top-right-radius: var(--radius-xl);
+}
+
+/* The swipe handle's grab-bar is drawn as a sharp-cornered ::after pill —
+   every other small pill/indicator in this app (badges, the SeatMeter
+   cells) reads as fully rounded, so a rectangular grab bar stood out. */
+[data-slot="drawer-swipe-handle"]::after {
+  border-radius: 9999px;
 }

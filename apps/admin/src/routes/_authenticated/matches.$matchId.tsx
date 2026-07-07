@@ -85,10 +85,8 @@ function MatchDetailPage() {
             <h1 className="text-2xl font-semibold tracking-tight capitalize">
               {formatTashkentDateTime(match.startsAt, "long")}
             </h1>
-            {player?.isAdmin && (
-              <Badge variant={match.isPublished ? "secondary" : "outline"}>
-                {match.isPublished ? "Опубликовано" : "Черновик"}
-              </Badge>
+            {player?.isAdmin && !match.isPublished && (
+              <Badge className="text-primary">Черновик</Badge>
             )}
           </div>
           <p className="text-sm text-muted-foreground">
@@ -110,9 +108,10 @@ function MatchDetailPage() {
           )}
         </div>
         {player?.isAdmin && (
-          <div className="flex w-full shrink-0 flex-wrap gap-2 sm:w-auto">
+          <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
             {!match.isPublished && (
               <Button
+                className="w-full sm:w-auto"
                 onClick={async () => {
                   await publishMatch({ matchId: match._id })
                   toast.success("Игра опубликована в группе")
@@ -123,12 +122,15 @@ function MatchDetailPage() {
             )}
             <Button
               variant="outline"
+              className="w-full sm:w-auto"
               render={<Link to="/matches/$matchId/edit" params={{ matchId: match._id }} />}
             >
               Редактировать
             </Button>
             <AlertDialog>
-              <AlertDialogTrigger render={<Button variant="destructive" />}>
+              <AlertDialogTrigger
+                render={<Button variant="destructive" className="w-full sm:w-auto" />}
+              >
                 Отменить
               </AlertDialogTrigger>
               <AlertDialogContent>

@@ -5,6 +5,7 @@ import { Empty, EmptyDescription, EmptyTitle } from "@J-schedule/ui/components/e
 import { Skeleton } from "@J-schedule/ui/components/skeleton"
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "convex/react"
+import { useState } from "react"
 
 import StatCard from "@/components/stat-card"
 import { formatTashkentDateTime } from "@/lib/format"
@@ -13,8 +14,13 @@ export const Route = createFileRoute("/_authenticated/history")({
   component: HistoryPage,
 })
 
+type RoleFilter = "roster" | "waitlist" | null
+
 function HistoryPage() {
   const history = useQuery(api.matches.listMyHistory)
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>(null)
+
+  const visible = roleFilter ? history?.filter((h) => h.membership.role === roleFilter) : history
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
@@ -22,14 +28,23 @@ function HistoryPage() {
 
       {history && history.length > 0 && (
         <div className="grid grid-cols-3 gap-3">
-          <StatCard label="Сыграно игр" value={history.length} />
+          <StatCard
+            label="Сыграно игр"
+            value={history.length}
+            onClick={() => setRoleFilter(null)}
+            active={roleFilter === null}
+          />
           <StatCard
             label="В ростере"
             value={history.filter((h) => h.membership.role === "roster").length}
+            onClick={() => setRoleFilter(roleFilter === "roster" ? null : "roster")}
+            active={roleFilter === "roster"}
           />
           <StatCard
             label="В листе ожидания"
             value={history.filter((h) => h.membership.role === "waitlist").length}
+            onClick={() => setRoleFilter(roleFilter === "waitlist" ? null : "waitlist")}
+            active={roleFilter === "waitlist"}
           />
         </div>
       )}
@@ -55,9 +70,11 @@ function HistoryPage() {
             Сыгранные игры, в которых ты участвовал(-а), появятся здесь.
           </EmptyDescription>
         </Empty>
+      ) : visible && visible.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Нет игр в этой категории.</p>
       ) : (
         <ul className="flex flex-col gap-2">
-          {history.map(({ membership, match }) => (
+          {visible?.map(({ membership, match }) => (
             <li key={membership._id}>
               <Card>
                 <CardContent className="flex items-center justify-between gap-4">

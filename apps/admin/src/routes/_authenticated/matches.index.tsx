@@ -9,6 +9,7 @@ import { useMutation, useQuery } from "convex/react"
 import { useState } from "react"
 import { toast } from "sonner"
 
+import MatchesActiveFilters from "@/components/matches-active-filters"
 import MatchesFilterPanel from "@/components/matches-filter-panel"
 import StatCard from "@/components/stat-card"
 import { formatTashkentDateTime } from "@/lib/format"
@@ -69,7 +70,7 @@ function MatchesList() {
 
       {matches && matches.length > 0 && (
         <div className="grid grid-cols-3 gap-3">
-          <StatCard label="Предстоящих игр" value={matches.length} />
+          <StatCard label="Предстоящих игр" value={matches.length} to="/matches" />
           <StatCard
             label="Свободных мест"
             value={matches.reduce(
@@ -89,19 +90,26 @@ function MatchesList() {
                 )) *
                 100,
             )}%`}
+            to="/matches"
           />
         </div>
       )}
 
       {matches && matches.length > 0 && (
-        <MatchesFilterPanel
-          courts={[...new Set(matches.map((m) => m.match.court))].sort()}
-          formats={[...new Set(matches.map((m) => m.match.format))].sort()}
-          levels={[...new Set(matches.map((m) => m.match.level))].sort()}
-          search={search}
-          showStatusFilter={!!player?.isAdmin}
-          onChange={(patch) => navigate({ search: (prev) => ({ ...prev, ...patch }) })}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <MatchesFilterPanel
+            courts={[...new Set(matches.map((m) => m.match.court))].sort()}
+            formats={[...new Set(matches.map((m) => m.match.format))].sort()}
+            levels={[...new Set(matches.map((m) => m.match.level))].sort()}
+            search={search}
+            showStatusFilter={!!player?.isAdmin}
+            onChange={(patch) => navigate({ search: (prev) => ({ ...prev, ...patch }) })}
+          />
+          <MatchesActiveFilters
+            search={search}
+            onRemove={(key) => navigate({ search: (prev) => ({ ...prev, [key]: undefined }) })}
+          />
+        </div>
       )}
 
       {matches === undefined ? (
@@ -153,7 +161,7 @@ function MatchesList() {
                       {formatTashkentDateTime(match.startsAt, "long")}
                     </CardTitle>
                     {player?.isAdmin && !match.isPublished && (
-                      <Badge variant="outline">Черновик</Badge>
+                      <Badge className="text-primary">Черновик</Badge>
                     )}
                   </div>
                   <p className="text-sm text-muted-foreground">

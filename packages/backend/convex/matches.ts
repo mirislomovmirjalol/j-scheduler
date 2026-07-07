@@ -116,7 +116,13 @@ export const publishMatch = mutation({
     if (existing.isPublished) return;
 
     await ctx.db.patch("matches", matchId, { isPublished: true });
-    await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
+    // force: true — a silent in-place edit would update the existing board
+    // message with no Telegram notification, so a newly published match
+    // (the moment it actually becomes joinable) would go unnoticed by the
+    // group. Same reasoning as the manual "Отправить в группу" repost.
+    await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {
+      force: true,
+    });
   },
 });
 
