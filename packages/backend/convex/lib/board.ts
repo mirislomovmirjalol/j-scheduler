@@ -84,9 +84,13 @@ export function renderBoard(
     const spotsLeft = match.maxMembers - match.rosterCount;
     const isFull = spotsLeft <= 0;
 
+    const title = `${weekday}, ${dateTime}`;
     lines.push(
-      `${marker} ${weekday}, ${dateTime} · ${escapeHtml(match.court)} · ${escapeHtml(match.format)}`,
-      `Уровень ${escapeHtml(match.level)} · 👥 ${match.rosterCount}/${match.maxMembers}${isFull ? " · заполнено" : ""}`,
+      `${marker} ${withLinks ? `<b>${title}</b>` : title}`,
+      `📍 ${escapeHtml(match.court)}`,
+      `🎾 ${escapeHtml(match.format)}`,
+      `Уровень ${escapeHtml(match.level)}`,
+      `👥 ${match.rosterCount}/${match.maxMembers}${isFull ? " · заполнено" : ""}`,
     );
     if (match.pricePerPerson) {
       lines.push(`💵 ${match.pricePerPerson} с человека`);
