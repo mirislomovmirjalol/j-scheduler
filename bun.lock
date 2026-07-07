@@ -24,6 +24,8 @@
         "@J-schedule/env": "workspace:*",
         "@J-schedule/ui": "workspace:*",
         "@convex-dev/better-auth": "catalog:",
+        "@hugeicons/core-free-icons": "^4.2.2",
+        "@hugeicons/react": "^1.1.9",
         "@tailwindcss/vite": "^4.3.1",
         "@tanstack/react-router": "^1.170.17",
         "better-auth": "catalog:",

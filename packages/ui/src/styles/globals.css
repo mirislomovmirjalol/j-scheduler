@@ -146,3 +146,56 @@
     font-size: 16px !important;
   }
 }
+
+/* A single soft highlight sweeping around a rounded border — the classic
+   "shiny border" effect. Registering --shine-angle as an <angle> custom
+   property lets the browser interpolate it smoothly frame-to-frame instead
+   of snapping between conic-gradient stops. This is ambient decoration
+   visible on every page, all the time — so it stays on `linear` easing and
+   a deliberately long duration (a full minute per revolution) to read as a
+   barely-there shimmer rather than something that draws the eye. */
+@property --shine-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes shine-rotate {
+  to {
+    --shine-angle: 360deg;
+  }
+}
+
+.shiny-border {
+  position: relative;
+  isolation: isolate;
+}
+
+.shiny-border::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--shine-angle),
+    transparent 0deg,
+    transparent 260deg,
+    color-mix(in oklch, var(--foreground) 35%, transparent) 320deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: shine-rotate 60s linear infinite;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shiny-border::before {
+    animation: none;
+  }
+}

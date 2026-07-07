@@ -16,7 +16,7 @@ function RootDocument() {
     <ConvexBetterAuthProvider client={convexClient} authClient={authClient}>
       <ThemeProvider>
         <Outlet />
-        <Toaster richColors />
+        <Toaster position="top-center" richColors />
       </ThemeProvider>
       <TanStackRouterDevtools />
     </ConvexBetterAuthProvider>
