@@ -1,21 +1,30 @@
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Moon02Icon, Sun01Icon } from "@hugeicons/core-free-icons"
+import { Button } from "@J-schedule/ui/components/button"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@J-schedule/ui/components/dropdown-menu"
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@J-schedule/ui/components/dialog"
 import { useTheme } from "next-themes"
 
 import { NavTooltip, navIconButtonClassName } from "@/components/nav-tooltip"
 
+const THEME_OPTIONS = [
+  { value: "light", label: "Светлая" },
+  { value: "dark", label: "Тёмная" },
+  { value: "system", label: "Системная" },
+] as const
+
 export default function ThemeToggle() {
-  const { setTheme } = useTheme()
+  const { theme, setTheme } = useTheme()
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
+    <Dialog>
+      <DialogTrigger
         render={
           <button type="button" aria-label="Тема" className={navIconButtonClassName}>
             <HugeiconsIcon
@@ -32,11 +41,26 @@ export default function ThemeToggle() {
           </button>
         }
       />
-      <DropdownMenuContent align="start" side="right">
-        <DropdownMenuItem onClick={() => setTheme("light")}>Светлая</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("dark")}>Тёмная</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("system")}>Системная</DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      <DialogContent className="max-w-xs">
+        <DialogHeader>
+          <DialogTitle>Тема</DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col gap-2">
+          {THEME_OPTIONS.map((option) => (
+            <DialogClose
+              key={option.value}
+              render={
+                <Button
+                  variant={theme === option.value ? "default" : "outline"}
+                  onClick={() => setTheme(option.value)}
+                />
+              }
+            >
+              {option.label}
+            </DialogClose>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
