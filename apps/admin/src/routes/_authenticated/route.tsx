@@ -15,7 +15,7 @@ export const Route = createFileRoute("/_authenticated")({
 
 function AuthenticatedLayout() {
   return (
-    <div className="h-svh">
+    <div className="h-dvh">
       <AppNav />
       {/* The nav floats (fixed) instead of sitting in flow, so content
           needs its own clearance: extra top padding under the mobile top

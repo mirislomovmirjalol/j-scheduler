@@ -21,7 +21,6 @@ import {
 import { Link, useNavigate } from "@tanstack/react-router"
 import { BorderBeam } from "border-beam"
 import { useQuery } from "convex/react"
-import { useTheme } from "next-themes"
 
 import { NavTooltip, navIconButtonClassName } from "@/components/nav-tooltip"
 import ThemeToggle from "@/components/theme-toggle"
@@ -33,11 +32,6 @@ const navShapeClassName =
 export default function AppNav() {
   const player = useQuery(api.players.getCurrentPlayer)
   const navigate = useNavigate()
-  // next-themes already resolves "system" to the actual light/dark value in
-  // use — reading that (rather than letting BorderBeam guess independently
-  // off matchMedia) is what keeps the beam's colors in sync with a manually
-  // chosen theme instead of only the OS preference.
-  const { resolvedTheme } = useTheme()
 
   return (
     <nav className={`${navShapeClassName} relative`}>
@@ -45,9 +39,8 @@ export default function AppNav() {
         <BorderBeam
           size="pulse-inner"
           colorVariant="mono"
-          strength={1}
-          theme={resolvedTheme === "light" ? "light" : "dark"}
-          className="size-full rounded-full border border-border/30 bg-background/40 shadow-lg backdrop-blur-xl"
+          strength={0.42}
+          className="size-full rounded-full border border-border/90 bg-background/40 shadow-lg backdrop-blur-xl"
           aria-hidden="true"
         >
           <div className="size-full rounded-full" />
@@ -67,10 +60,12 @@ export default function AppNav() {
           <HugeiconsIcon icon={HistoryIcon} strokeWidth={2} className="size-5" />
           <NavTooltip label="История" />
         </Link>
-        <Link to="/players" className={navIconButtonClassName}>
-          <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} className="size-5" />
-          <NavTooltip label="Игроки" />
-        </Link>
+        {player?.isAdmin && (
+          <Link to="/players" className={navIconButtonClassName}>
+            <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} className="size-5" />
+            <NavTooltip label="Игроки" />
+          </Link>
+        )}
 
         <div role="separator" className="mx-1 h-px w-6 bg-border sm:mx-0 sm:h-6 sm:w-px" />
 
