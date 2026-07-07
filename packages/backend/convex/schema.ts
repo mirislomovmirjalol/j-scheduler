@@ -12,9 +12,11 @@ import { v } from "convex/values";
  *  - Guests are first-class player rows (type: "guest", telegramUserId: null).
  *    This makes a future guest→authed MERGE trivial: repoint memberships and
  *    delete the guest row. No schema change needed later.
- *  - No user-facing status on matches (per product decision). Open / full /
- *    past is DERIVED from `startsAt` + roster count. Cancellation = soft delete
- *    (isDeleted flag), so a mistaken cancel is never permanent.
+ *  - Open / full / past is DERIVED from `startsAt` + roster count, not stored.
+ *    Cancellation = soft delete (isDeleted flag), so a mistaken cancel is never
+ *    permanent. The one stored status is `isPublished`: a match starts as a
+ *    draft only admins can see, and stays off the Telegram board and the
+ *    player-facing web view until an admin explicitly publishes it.
  *  - All timestamps are UTC epoch millis. Display in Tashkent (UTC+5) at the edge.
  *  - Free-text fields (court, level) are strings in v1; dashboard offers
  *    copy-paste autocomplete built from history. No venue/level tables yet.
@@ -87,6 +89,8 @@ export default defineSchema({
     pricePerPerson: v.optional(v.number()),
 
     lundaUrl: v.optional(v.string()), // per-match link, pasted at creation
+
+    isPublished: v.boolean(), // draft until an admin presses "Опубликовать"
 
     createdBy: v.id("players"), // admin who created it
     isDeleted: v.boolean(), // soft delete == cancel (users see no status)

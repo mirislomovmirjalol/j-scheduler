@@ -3,8 +3,9 @@ import { Button } from "@J-schedule/ui/components/button";
 import { Input } from "@J-schedule/ui/components/input";
 import { Label } from "@J-schedule/ui/components/label";
 import { useQuery } from "convex/react";
-import { useId, useState } from "react";
+import { useState } from "react";
 
+import AutocompleteInput from "@/components/autocomplete-input";
 import { epochMsToTashkentLocal, tashkentLocalToEpochMs } from "@/lib/tashkent-time";
 
 export type MatchFormValues = {
@@ -72,7 +73,6 @@ export default function MatchForm({
   const courtHistory = useQuery(api.matches.listCourtHistory);
   const formatHistory = useQuery(api.matches.listFormatHistory);
   const levelHistory = useQuery(api.matches.listLevelHistory);
-  const listId = useId();
 
   const set = <K extends keyof MatchFormValues>(key: K, value: MatchFormValues[K]) =>
     setValues((v) => ({ ...v, [key]: value }));
@@ -85,7 +85,7 @@ export default function MatchForm({
         onSubmit(values);
       }}
     >
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="startsAt">Дата и время</Label>
           <Input
@@ -118,50 +118,41 @@ export default function MatchForm({
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="court">Корт</Label>
-          <Input
+          <AutocompleteInput
             id="court"
             required
-            list={`${listId}-court`}
             value={values.court}
-            onChange={(e) => set("court", e.target.value)}
+            onChange={(v) => set("court", v)}
+            options={courtHistory}
           />
-          <datalist id={`${listId}-court`}>
-            {courtHistory?.map((c) => <option key={c} value={c} />)}
-          </datalist>
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="format">Формат</Label>
-          <Input
+          <AutocompleteInput
             id="format"
             required
-            list={`${listId}-format`}
             value={values.format}
-            onChange={(e) => set("format", e.target.value)}
+            onChange={(v) => set("format", v)}
+            options={formatHistory}
           />
-          <datalist id={`${listId}-format`}>
-            {formatHistory?.map((f) => <option key={f} value={f} />)}
-          </datalist>
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="level">Уровень</Label>
-          <Input
+          <AutocompleteInput
             id="level"
             required
             placeholder="1-2"
-            list={`${listId}-level`}
             value={values.level}
-            onChange={(e) => set("level", e.target.value)}
+            onChange={(v) => set("level", v)}
+            options={levelHistory}
           />
-          <datalist id={`${listId}-level`}>
-            {levelHistory?.map((l) => <option key={l} value={l} />)}
-          </datalist>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="maxMembers">Мест</Label>
           <Input

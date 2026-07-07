@@ -27,7 +27,8 @@ function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 type NamedPlayer = { name: string; telegramUserId: number | null };
@@ -87,6 +88,12 @@ export function renderBoard(
       `${marker} ${weekday}, ${dateTime} · ${escapeHtml(match.court)} · ${escapeHtml(match.format)}`,
       `Уровень ${escapeHtml(match.level)} · 👥 ${match.rosterCount}/${match.maxMembers}${isFull ? " · заполнено" : ""}`,
     );
+    if (match.pricePerPerson) {
+      lines.push(`💵 ${match.pricePerPerson} с человека`);
+    }
+    if (match.description) {
+      lines.push(escapeHtml(match.description));
+    }
     for (const player of match.rosterNames) {
       lines.push(`• ${nameText(player)}`);
     }
@@ -95,6 +102,13 @@ export function renderBoard(
       for (const player of match.waitlistNames) {
         lines.push(`• ${nameText(player)}`);
       }
+    }
+    if (match.lundaUrl) {
+      lines.push(
+        withLinks
+          ? `🔗 <a href="${escapeHtml(match.lundaUrl)}">Ссылка Lunda</a>`
+          : `🔗 ${escapeHtml(match.lundaUrl)}`,
+      );
     }
     lines.push("");
 

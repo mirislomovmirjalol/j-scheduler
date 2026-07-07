@@ -134,3 +134,15 @@
     @apply font-sans;
   }
 }
+
+/* iOS Safari zooms the page on focus of any form control with a computed
+   font-size under 16px. Utility classes like `text-sm` (14px) beat a bare
+   element selector on specificity, so this needs !important to actually
+   win — scoped to mobile widths so it never touches desktop type sizing. */
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}

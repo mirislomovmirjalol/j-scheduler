@@ -15,18 +15,18 @@ import ThemeToggle from "@/components/theme-toggle";
 import { authClient } from "@/lib/auth-client";
 
 const linkClassName =
-  "px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground [&.active]:bg-secondary [&.active]:text-foreground";
+  "shrink-0 px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground [&.active]:bg-secondary [&.active]:text-foreground sm:px-3";
 
 export default function AppNav({ player }: { player: Doc<"players"> }) {
   const router = useRouter();
 
   return (
-    <header className="flex items-center justify-between border-b px-4 py-3">
-      <div className="flex items-center gap-6">
-        <Link to="/matches" className="text-sm font-semibold tracking-tight">
+    <header className="flex items-center justify-between gap-2 border-b px-3 py-3 sm:px-4">
+      <div className="flex min-w-0 items-center gap-3 sm:gap-6">
+        <Link to="/matches" className="shrink-0 text-sm font-semibold tracking-tight">
           Игры
         </Link>
-        <nav className="flex gap-1">
+        <nav className="flex min-w-0 gap-1 overflow-x-auto">
           <Link to="/matches" className={linkClassName}>
             Матчи
           </Link>
@@ -41,14 +41,16 @@ export default function AppNav({ player }: { player: Doc<"players"> }) {
         </nav>
       </div>
 
-      <div className="flex items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1">
         <ThemeToggle />
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
               <Button variant="ghost" className="gap-2 text-sm">
-                {player.firstName}
-                {player.lastName ? ` ${player.lastName}` : ""}
+                <span className="max-w-24 truncate sm:max-w-none">
+                  {player.firstName}
+                  {player.lastName ? ` ${player.lastName}` : ""}
+                </span>
               </Button>
             }
           />

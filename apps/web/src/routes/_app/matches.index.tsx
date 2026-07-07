@@ -42,13 +42,14 @@ function MatchesList() {
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Матчи</h1>
         {player.isAdmin && (
-          <div className="flex gap-2">
+          <div className="flex w-full flex-wrap gap-2 sm:w-auto">
             <Button
               variant="outline"
               disabled={reposting}
+              className="flex-1 sm:flex-none"
               onClick={async () => {
                 setReposting(true);
                 try {
@@ -63,7 +64,9 @@ function MatchesList() {
             >
               {reposting ? "Отправляем…" : "Отправить в группу"}
             </Button>
-            <Button render={<Link to="/matches/new" />}>+ Новая игра</Button>
+            <Button render={<Link to="/matches/new" />} className="flex-1 sm:flex-none">
+              + Новая игра
+            </Button>
           </div>
         )}
       </div>
@@ -107,9 +110,14 @@ function MatchesList() {
             <Link key={match._id} to="/matches/$matchId" params={{ matchId: match._id }}>
               <Card className="transition-colors hover:bg-secondary">
                 <CardHeader>
-                  <CardTitle className="text-base font-medium capitalize">
-                    {formatDateTime(match.startsAt)}
-                  </CardTitle>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CardTitle className="text-base font-medium capitalize">
+                      {formatDateTime(match.startsAt)}
+                    </CardTitle>
+                    {player.isAdmin && !match.isPublished && (
+                      <Badge variant="outline">Черновик</Badge>
+                    )}
+                  </div>
                   <p className="text-sm text-muted-foreground">
                     {match.court} · {match.format} · Уровень {match.level}
                     {match.pricePerPerson ? ` · ${match.pricePerPerson} с человека` : ""}

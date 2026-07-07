@@ -89,14 +89,50 @@ export const createMatch = mutation({
 
     const matchId = await ctx.db.insert("matches", {
       ...args,
+      isPublished: false,
       createdBy: admin._id,
       isDeleted: false,
       createdAt: Date.now(),
     });
 
     await scheduleReminders(ctx, matchId, args.startsAt);
-    await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
+    // No board sync here — the match is a draft (isPublished: false) and
+    // must stay invisible to the group and the player-facing web view until
+    // publishMatch is called.
     return matchId;
+  },
+});
+
+// Drafts stay invisible (board + player-facing web view) until an admin
+// explicitly publishes. Idempotent — publishing an already-published match
+// is a no-op.
+export const publishMatch = mutation({
+  args: { matchId: v.id("matches") },
+  handler: async (ctx, { matchId }) => {
+    await requireAdminPlayer(ctx);
+
+    const existing = await ctx.db.get("matches", matchId);
+    if (!existing || existing.isDeleted) throw new Error("Match not found");
+    if (existing.isPublished) return;
+
+    await ctx.db.patch("matches", matchId, { isPublished: true });
+    await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
+  },
+});
+
+// Reverts a published match back to draft (e.g. published by mistake).
+// Removes it from the board on the next sync.
+export const unpublishMatch = mutation({
+  args: { matchId: v.id("matches") },
+  handler: async (ctx, { matchId }) => {
+    await requireAdminPlayer(ctx);
+
+    const existing = await ctx.db.get("matches", matchId);
+    if (!existing || existing.isDeleted) throw new Error("Match not found");
+    if (!existing.isPublished) return;
+
+    await ctx.db.patch("matches", matchId, { isPublished: false });
+    await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
   },
 });
 
@@ -219,13 +255,15 @@ export const cancelMatch = mutation({
 export const listOpenWithRosterCounts = internalQuery({
   args: {},
   handler: async (ctx) => {
-    const matches = await ctx.db
-      .query("matches")
-      .withIndex("by_isDeleted_startsAt", (q) =>
-        q.eq("isDeleted", false).gte("startsAt", Date.now()),
-      )
-      .order("asc")
-      .take(50);
+    const matches = (
+      await ctx.db
+        .query("matches")
+        .withIndex("by_isDeleted_startsAt", (q) =>
+          q.eq("isDeleted", false).gte("startsAt", Date.now()),
+        )
+        .order("asc")
+        .take(50)
+    ).filter((m) => m.isPublished);
 
     const namesFor = async (matchId: Id<"matches">, role: "roster" | "waitlist") => {
       const memberships = await ctx.db
@@ -316,17 +354,21 @@ export const listWaitlistPlayers = internalQuery({
 // Match detail page: the match plus full roster/waitlist with player info
 // and membership metadata (joinedAt, addedBy). Any authenticated player can
 // view this (the unified matches view) — admin-only actions are gated
-// separately at the mutation level (cancelMatch, removeMember, etc.).
+// separately at the mutation level (cancelMatch, removeMember, etc.). A
+// draft (isPublished: false) is admin-only — regular players see "not
+// found", same as any other match they shouldn't know exists yet.
 export const getMatchDetail = query({
   args: { matchId: v.id("matches") },
   handler: async (ctx, { matchId }) => {
     // Graceful-degrade on a transient auth race (see players.listAll) —
     // already returns T | null, so a failed check just looks like "not
     // found" for a moment until the query self-heals.
-    if (!(await requireAuthedPlayer(ctx).catch(() => null))) return null;
+    const player = await requireAuthedPlayer(ctx).catch(() => null);
+    if (!player) return null;
 
     const match = await ctx.db.get("matches", matchId);
     if (!match) return null;
+    if (!match.isPublished && !player.isAdmin) return null;
 
     const memberships = await ctx.db
       .query("memberships")
@@ -353,20 +395,25 @@ export const getMatchDetail = query({
 // Read-only player web view (Milestone 9) — any authenticated player (not
 // just admins) can see upcoming matches with FULL rosters. This is the
 // deliberate exception to the board's collapsed-roster rule: CLAUDE.md's
-// board model says full rosters show "one tap (or the web view)".
+// board model says full rosters show "one tap (or the web view)". Admins
+// additionally see drafts (isPublished: false) so they can review and
+// publish them; regular players only ever see published matches.
 export const listUpcomingForPlayer = query({
   args: {},
   handler: async (ctx) => {
     // Graceful-degrade on a transient auth race (see players.listAll).
-    if (!(await requireAuthedPlayer(ctx).catch(() => null))) return [];
+    const player = await requireAuthedPlayer(ctx).catch(() => null);
+    if (!player) return [];
 
-    const matches = await ctx.db
-      .query("matches")
-      .withIndex("by_isDeleted_startsAt", (q) =>
-        q.eq("isDeleted", false).gte("startsAt", Date.now()),
-      )
-      .order("asc")
-      .take(50);
+    const matches = (
+      await ctx.db
+        .query("matches")
+        .withIndex("by_isDeleted_startsAt", (q) =>
+          q.eq("isDeleted", false).gte("startsAt", Date.now()),
+        )
+        .order("asc")
+        .take(50)
+    ).filter((m) => m.isPublished || player.isAdmin);
 
     return await Promise.all(
       matches.map(async (match) => {

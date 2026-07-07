@@ -61,6 +61,7 @@ function MatchDetailPage() {
     matchId: matchId as Id<"matches">,
   });
   const cancelMatch = useMutation(api.matches.cancelMatch);
+  const publishMatch = useMutation(api.matches.publishMatch);
   const navigate = useNavigate();
 
   if (detail === undefined) {
@@ -85,11 +86,18 @@ function MatchDetailPage() {
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col items-start justify-between gap-4 sm:flex-row">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight capitalize">
-            {formatDateTime(match.startsAt)}
-          </h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-semibold tracking-tight capitalize">
+              {formatDateTime(match.startsAt)}
+            </h1>
+            {player.isAdmin && (
+              <Badge variant={match.isPublished ? "secondary" : "outline"}>
+                {match.isPublished ? "Опубликовано" : "Черновик"}
+              </Badge>
+            )}
+          </div>
           <p className="text-sm text-muted-foreground">
             {match.court} · {match.format} · Уровень {match.level}
             {match.pricePerPerson ? ` · ${match.pricePerPerson} с человека` : ""}
@@ -109,7 +117,17 @@ function MatchDetailPage() {
           )}
         </div>
         {player.isAdmin && (
-          <div className="flex shrink-0 gap-2">
+          <div className="flex w-full shrink-0 flex-wrap gap-2 sm:w-auto">
+            {!match.isPublished && (
+              <Button
+                onClick={async () => {
+                  await publishMatch({ matchId: match._id });
+                  toast.success("Игра опубликована в группе");
+                }}
+              >
+                Опубликовать
+              </Button>
+            )}
             <Button
               variant="outline"
               render={<Link to="/matches/$matchId/edit" params={{ matchId: match._id }} />}
@@ -325,7 +343,7 @@ function AddGuestDialog({ matchId }: { matchId: Id<"matches"> }) {
                 onChange={(e) => setName(e.target.value)}
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="guestLevel">Уровень</Label>
                 <Input id="guestLevel" value={level} onChange={(e) => setLevel(e.target.value)} />
