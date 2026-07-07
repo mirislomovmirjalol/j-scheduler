@@ -1,5 +1,12 @@
 import { HugeiconsIcon } from "@hugeicons/react"
-import { Home01Icon, Logout01Icon, UserIcon } from "@hugeicons/core-free-icons"
+import {
+  Calendar03Icon,
+  HistoryIcon,
+  Home01Icon,
+  Logout01Icon,
+  UserGroupIcon,
+  UserIcon,
+} from "@hugeicons/core-free-icons"
 import { api } from "@J-schedule/backend/convex/_generated/api"
 import {
   DropdownMenu,
@@ -26,6 +33,18 @@ export default function AppNav() {
       <Link to="/" className={navIconButtonClassName}>
         <HugeiconsIcon icon={Home01Icon} strokeWidth={2} className="size-5" />
         <NavTooltip label="Дашборд" />
+      </Link>
+      <Link to="/matches" className={navIconButtonClassName}>
+        <HugeiconsIcon icon={Calendar03Icon} strokeWidth={2} className="size-5" />
+        <NavTooltip label="Матчи" />
+      </Link>
+      <Link to="/history" className={navIconButtonClassName}>
+        <HugeiconsIcon icon={HistoryIcon} strokeWidth={2} className="size-5" />
+        <NavTooltip label="История" />
+      </Link>
+      <Link to="/players" className={navIconButtonClassName}>
+        <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} className="size-5" />
+        <NavTooltip label="Игроки" />
       </Link>
 
       <div role="separator" className="mx-1 h-px w-6 bg-border sm:mx-0 sm:h-6 sm:w-px" />
