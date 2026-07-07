@@ -12,7 +12,7 @@ import { toast } from "sonner"
 import StatCard from "@/components/stat-card"
 import { formatTashkentDateTime } from "@/lib/format"
 
-export const Route = createFileRoute("/_authenticated/matches")({
+export const Route = createFileRoute("/_authenticated/matches/")({
   component: MatchesList,
 })
 
