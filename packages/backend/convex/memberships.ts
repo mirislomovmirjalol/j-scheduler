@@ -221,6 +221,65 @@ export const addGuestToMatch = mutation({
   },
 });
 
+// Admin adds an already-registered player (found via players.search) to a
+// match — same roster/waitlist capacity logic as addGuestToMatch, but for
+// an existing player row instead of creating a guest. Idempotent: re-adding
+// someone already on the match is a no-op that returns their current role,
+// matching joinMatch's double-tap guard.
+export const addExistingPlayerToMatch = mutation({
+  args: { matchId: v.id("matches"), playerId: v.id("players") },
+  handler: async (ctx, { matchId, playerId }) => {
+    const admin = await requireAdminPlayer(ctx);
+
+    const match = await ctx.db.get("matches", matchId);
+    if (!match || match.isDeleted) throw new Error("Match not found");
+
+    const player = await ctx.db.get("players", playerId);
+    if (!player || player.isDeleted) throw new Error("Player not found");
+
+    const existing = await ctx.db
+      .query("memberships")
+      .withIndex("by_match_and_player", (q) =>
+        q.eq("matchId", matchId).eq("playerId", playerId),
+      )
+      .unique();
+
+    if (existing && !existing.isDeleted) {
+      return { outcome: existing.role, alreadyJoined: true };
+    }
+
+    const rosterCount = (
+      await ctx.db
+        .query("memberships")
+        .withIndex("by_match_and_role", (q) => q.eq("matchId", matchId).eq("role", "roster"))
+        .take(200)
+    ).filter((m) => !m.isDeleted).length;
+
+    const role = rosterCount < match.maxMembers ? "roster" : "waitlist";
+
+    if (existing) {
+      await ctx.db.patch("memberships", existing._id, {
+        role,
+        isDeleted: false,
+        joinedAt: Date.now(),
+        addedBy: { admin: admin._id },
+      });
+    } else {
+      await ctx.db.insert("memberships", {
+        matchId,
+        playerId,
+        role,
+        joinedAt: Date.now(),
+        addedBy: { admin: admin._id },
+        isDeleted: false,
+      });
+    }
+
+    await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
+    return { outcome: role, alreadyJoined: false };
+  },
+});
+
 // Resolves a membership's player + match in one shot — used by
 // telegram/notify.ts's membershipChanged to DM the affected player after an
 // admin removes or promotes them. Works even after removeMember has already

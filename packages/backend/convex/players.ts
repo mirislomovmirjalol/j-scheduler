@@ -173,6 +173,31 @@ export const listAll = query({
   },
 });
 
+// Backs the "add existing member" search in the match detail page — a
+// substring match over name/username, not a real search index. Fine at
+// community scale (same take(500) bound as listAll); revisit if the roster
+// ever grows large enough for this to matter.
+export const search = query({
+  args: { query: v.string() },
+  handler: async (ctx, { query }) => {
+    if (!(await requireAdminPlayer(ctx).catch(() => null))) return [];
+
+    const needle = query.trim().toLowerCase();
+    if (needle.length < 2) return [];
+
+    const players = await ctx.db.query("players").order("desc").take(500);
+    return players
+      .filter((p) => !p.isDeleted && p.type === "authed")
+      .filter(
+        (p) =>
+          p.firstName.toLowerCase().includes(needle) ||
+          p.lastName?.toLowerCase().includes(needle) ||
+          p.username?.toLowerCase().includes(needle),
+      )
+      .slice(0, 20);
+  },
+});
+
 // Player profile page (admin-only lookup of any player).
 export const getById = query({
   args: { playerId: v.id("players") },

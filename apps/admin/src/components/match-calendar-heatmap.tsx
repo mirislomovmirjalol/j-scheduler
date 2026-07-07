@@ -1,8 +1,16 @@
 import { useMemo, useState } from "react"
+import { createPortal } from "react-dom"
 
 import { tashkentDayIndex, tashkentDayIndexToDate } from "@/lib/tashkent-time"
 
 const WEEKS_TO_SHOW = 53
+// Cell + gap footprint in px — kept uniform across breakpoints (not shrunk
+// on desktop) so mobile touch targets stay usable; must match CELL_PX +
+// gap-1 below, since the month labels are positioned from it directly.
+const CELL_PX = 14
+const GAP_PX = 4
+const COLUMN_PX = CELL_PX + GAP_PX
+
 const WEEKDAY_LABELS = ["Пн", "", "Ср", "", "Пт", "", "Вс"]
 const MONTH_LABELS = [
   "Янв",
@@ -35,6 +43,8 @@ function levelFor(attendees: number, maxAttendees: number): number {
 
 export type CalendarMatch = { startsAt: number; rosterCount: number }
 
+type HoverState = { x: number; y: number; text: string }
+
 export default function MatchCalendarHeatmap({ matches }: { matches: CalendarMatch[] }) {
   // Impure — captured once via a lazy useState initializer (not called
   // directly during render, which react-hooks/purity disallows anywhere in
@@ -42,6 +52,14 @@ export default function MatchCalendarHeatmap({ matches }: { matches: CalendarMat
   // memo dependency. Not updating live past midnight is fine: this data
   // needs a manual reload to reflect new matches anyway.
   const [todayIndex] = useState(() => tashkentDayIndex(Date.now()))
+  // Portaled to <body> (see render below) instead of an absolutely
+  // positioned child of the cell: this grid lives inside an
+  // overflow-x-auto scroll container (needed for horizontal scrolling on
+  // narrow screens), and CSS forces overflow-y to clip too the moment
+  // overflow-x isn't `visible` — so a tooltip anchored inside the grid
+  // gets cut off for any cell near the top edge. Fixed-position + portal
+  // sidesteps the whole containing-block problem.
+  const [hover, setHover] = useState<HoverState | null>(null)
 
   const { weeks, monthMarkers, maxAttendees } = useMemo(() => {
     const dayTotals = new Map<number, { matchCount: number; attendees: number }>()
@@ -96,7 +114,7 @@ export default function MatchCalendarHeatmap({ matches }: { matches: CalendarMat
             <span
               key={weekColumn}
               className="absolute"
-              style={{ left: `${weekColumn * 14}px` }}
+              style={{ left: `${weekColumn * COLUMN_PX}px` }}
             >
               {label}
             </span>
@@ -105,7 +123,7 @@ export default function MatchCalendarHeatmap({ matches }: { matches: CalendarMat
         <div className="flex gap-1">
           <div className="flex flex-col gap-1 pr-1 text-xs text-muted-foreground">
             {WEEKDAY_LABELS.map((label, i) => (
-              <span key={i} className="flex h-2.5 items-center">
+              <span key={i} className="flex items-center" style={{ height: CELL_PX }}>
                 {label}
               </span>
             ))}
@@ -115,24 +133,36 @@ export default function MatchCalendarHeatmap({ matches }: { matches: CalendarMat
               <div key={weekIndex} className="flex flex-col gap-1">
                 {column.map(({ dayIndex, date, matchCount, attendees }) => {
                   if (dayIndex > todayIndex) {
-                    return <div key={dayIndex} className="size-2.5" />
+                    return (
+                      <div key={dayIndex} style={{ width: CELL_PX, height: CELL_PX }} />
+                    )
                   }
+                  const text = `${date.toLocaleDateString("ru-RU", {
+                    day: "2-digit",
+                    month: "long",
+                    timeZone: "UTC",
+                  })}${
+                    matchCount > 0
+                      ? ` · ${matchCount} ${matchCount === 1 ? "игра" : "игры"} · ${attendees} чел.`
+                      : " · нет игр"
+                  }`
                   return (
-                    <div key={dayIndex} className="group relative">
-                      <div
-                        className={`size-2.5 rounded-[2px] ${LEVEL_CLASSES[levelFor(attendees, maxAttendees)]}`}
-                      />
-                      <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 -translate-x-1/2 scale-95 rounded-md bg-foreground px-2 py-1 text-xs whitespace-nowrap text-background opacity-0 transition-[opacity,transform] duration-150 ease-out group-hover:scale-100 group-hover:opacity-100">
-                        {date.toLocaleDateString("ru-RU", {
-                          day: "2-digit",
-                          month: "long",
-                          timeZone: "UTC",
-                        })}
-                        {matchCount > 0
-                          ? ` · ${matchCount} ${matchCount === 1 ? "игра" : "игры"} · ${attendees} чел.`
-                          : " · нет игр"}
-                      </div>
-                    </div>
+                    <button
+                      key={dayIndex}
+                      type="button"
+                      className={`rounded-[2px] transition-transform hover:scale-125 ${LEVEL_CLASSES[levelFor(attendees, maxAttendees)]}`}
+                      style={{ width: CELL_PX, height: CELL_PX }}
+                      onMouseEnter={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        setHover({ x: rect.left + rect.width / 2, y: rect.top, text })
+                      }}
+                      onMouseLeave={() => setHover(null)}
+                      onFocus={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        setHover({ x: rect.left + rect.width / 2, y: rect.top, text })
+                      }}
+                      onBlur={() => setHover(null)}
+                    />
                   )
                 })}
               </div>
@@ -140,6 +170,17 @@ export default function MatchCalendarHeatmap({ matches }: { matches: CalendarMat
           </div>
         </div>
       </div>
+
+      {hover &&
+        createPortal(
+          <div
+            className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full rounded-md bg-foreground px-2 py-1 text-xs whitespace-nowrap text-background"
+            style={{ left: hover.x, top: hover.y - 6 }}
+          >
+            {hover.text}
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }

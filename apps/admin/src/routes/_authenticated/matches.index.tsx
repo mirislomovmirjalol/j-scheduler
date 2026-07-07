@@ -9,10 +9,13 @@ import { useMutation, useQuery } from "convex/react"
 import { useState } from "react"
 import { toast } from "sonner"
 
+import MatchesFilterBar from "@/components/matches-filter-bar"
 import StatCard from "@/components/stat-card"
 import { formatTashkentDateTime } from "@/lib/format"
+import { applyMatchesFilters, parseMatchesSearch } from "@/lib/matches-filters"
 
 export const Route = createFileRoute("/_authenticated/matches/")({
+  validateSearch: parseMatchesSearch,
   component: MatchesList,
 })
 
@@ -26,6 +29,12 @@ function MatchesList() {
   const matches = useQuery(api.matches.listUpcomingForPlayer)
   const repostToGroup = useMutation(api.boardState.repostToGroup)
   const [reposting, setReposting] = useState(false)
+  const search = Route.useSearch()
+  const navigate = Route.useNavigate()
+
+  const filtered = matches
+    ? applyMatchesFilters(matches, search, player?._id)
+    : undefined
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
@@ -67,6 +76,8 @@ function MatchesList() {
               (sum, { match, roster }) => sum + Math.max(match.maxMembers - roster.length, 0),
               0,
             )}
+            to="/matches"
+            search={{ minOpenSeats: 1 }}
           />
           <StatCard
             label="Заполненность"
@@ -80,6 +91,17 @@ function MatchesList() {
             )}%`}
           />
         </div>
+      )}
+
+      {matches && matches.length > 0 && (
+        <MatchesFilterBar
+          courts={[...new Set(matches.map((m) => m.match.court))].sort()}
+          formats={[...new Set(matches.map((m) => m.match.format))].sort()}
+          levels={[...new Set(matches.map((m) => m.match.level))].sort()}
+          search={search}
+          showStatusFilter={!!player?.isAdmin}
+          onChange={(patch) => navigate({ search: (prev) => ({ ...prev, ...patch }) })}
+        />
       )}
 
       {matches === undefined ? (
@@ -115,9 +137,14 @@ function MatchesList() {
             </Button>
           )}
         </Empty>
+      ) : filtered && filtered.length === 0 ? (
+        <Empty>
+          <EmptyTitle>Нет игр по этим фильтрам</EmptyTitle>
+          <EmptyDescription>Попробуй сбросить или изменить фильтры.</EmptyDescription>
+        </Empty>
       ) : (
         <div className="flex flex-col gap-4">
-          {matches.map(({ match, roster, waitlist }) => (
+          {filtered!.map(({ match, roster, waitlist }) => (
             <Link key={match._id} to="/matches/$matchId" params={{ matchId: match._id }}>
               <Card className="transition-colors hover:bg-secondary">
                 <CardHeader>

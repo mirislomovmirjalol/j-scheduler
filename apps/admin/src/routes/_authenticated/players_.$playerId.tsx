@@ -7,6 +7,7 @@ import { Skeleton } from "@J-schedule/ui/components/skeleton"
 import { createFileRoute, Navigate } from "@tanstack/react-router"
 import { useQuery } from "convex/react"
 
+import BackButton from "@/components/back-button"
 import { formatTashkentDateTime } from "@/lib/format"
 import { useAdminGuard } from "@/lib/use-admin-guard"
 
@@ -36,6 +37,7 @@ function PlayerProfilePage() {
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
+      <BackButton />
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">
           {player.firstName} {player.lastName ?? ""}

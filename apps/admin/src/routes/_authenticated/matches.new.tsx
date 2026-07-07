@@ -5,6 +5,7 @@ import { useMutation } from "convex/react"
 import { useState } from "react"
 import { toast } from "sonner"
 
+import BackButton from "@/components/back-button"
 import MatchForm from "@/components/match-form"
 import { defaultMatchFormValues, matchFormValuesToArgs } from "@/lib/match-form-values"
 import { useAdminGuard } from "@/lib/use-admin-guard"
@@ -32,8 +33,9 @@ function NewMatchPage() {
   if (!player?.isAdmin) return <Navigate to="/matches" />
 
   return (
-    <div className="mx-auto max-w-lg p-6">
-      <h1 className="mb-6 text-2xl font-semibold tracking-tight">Новая игра</h1>
+    <div className="mx-auto flex max-w-lg flex-col p-6">
+      <BackButton />
+      <h1 className="mt-4 mb-6 text-2xl font-semibold tracking-tight">Новая игра</h1>
       <MatchForm
         initialValues={defaultMatchFormValues()}
         submitLabel="Создать игру"

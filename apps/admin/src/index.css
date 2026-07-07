@@ -22,3 +22,13 @@
 [data-slot="table-container"] {
   border-radius: var(--radius-xl);
 }
+
+/* Cards lean on packages/ui's shadow-sm + ring-1 (itself a box-shadow) for
+   definition — reads muddy at this app's flatter, more colorful surface.
+   A real border reads cleaner and is what "mostly borders, not shadows"
+   asked for. Dialog/alert-dialog keep their shadow: those are genuinely
+   elevated (overlaying the page), unlike a card sitting in the flow. */
+[data-slot="card"] {
+  box-shadow: none;
+  border: 1px solid var(--border);
+}

@@ -37,8 +37,10 @@ import { useMutation, useQuery } from "convex/react"
 import { useState } from "react"
 import { toast } from "sonner"
 
+import BackButton from "@/components/back-button"
 import SeatMeter from "@/components/seat-meter"
 import { formatTashkentDateTime } from "@/lib/format"
+import { useDebouncedValue } from "@/lib/use-debounced-value"
 
 export const Route = createFileRoute("/_authenticated/matches/$matchId")({
   component: MatchDetailPage,
@@ -76,6 +78,7 @@ function MatchDetailPage() {
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
+      <BackButton />
       <div className="flex flex-col items-start justify-between gap-4 sm:flex-row">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -176,7 +179,12 @@ function MatchDetailPage() {
         showActions={!!player?.isAdmin}
       />
 
-      {player?.isAdmin && <AddGuestDialog matchId={match._id} />}
+      {player?.isAdmin && (
+        <div className="flex flex-wrap gap-2">
+          <AddExistingMemberDialog matchId={match._id} />
+          <AddGuestDialog matchId={match._id} />
+        </div>
+      )}
     </div>
   )
 }
@@ -342,6 +350,74 @@ function AddGuestDialog({ matchId }: { matchId: Id<"matches"> }) {
             <Button type="submit">Добавить</Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function AddExistingMemberDialog({ matchId }: { matchId: Id<"matches"> }) {
+  const addExisting = useMutation(api.memberships.addExistingPlayerToMatch)
+  const [query, setQuery] = useState("")
+  const [open, setOpen] = useState(false)
+  const debouncedQuery = useDebouncedValue(query, 300).trim()
+  const results = useQuery(
+    api.players.search,
+    debouncedQuery.length >= 2 ? { query: debouncedQuery } : "skip",
+  )
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o)
+        if (!o) setQuery("")
+      }}
+    >
+      <DialogTrigger render={<Button variant="outline" className="self-start" />}>
+        + Добавить участника
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Добавить участника</DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col gap-3">
+          <Input
+            placeholder="Имя или @username"
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <div className="flex max-h-64 flex-col gap-1 overflow-y-auto">
+            {debouncedQuery.length < 2 ? (
+              <p className="text-sm text-muted-foreground">Введите минимум 2 символа.</p>
+            ) : results === undefined ? (
+              <p className="text-sm text-muted-foreground">Ищем…</p>
+            ) : results.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Никого не найдено.</p>
+            ) : (
+              results.map((p) => (
+                <button
+                  key={p._id}
+                  type="button"
+                  className="flex items-center justify-between gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-accent"
+                  onClick={async () => {
+                    const result = await addExisting({ matchId, playerId: p._id })
+                    toast.success(result.alreadyJoined ? "Уже в игре" : "Игрок добавлен")
+                    setOpen(false)
+                    setQuery("")
+                  }}
+                >
+                  <span>
+                    {p.firstName} {p.lastName ?? ""}
+                  </span>
+                  {p.username && (
+                    <span className="text-muted-foreground">@{p.username}</span>
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   )
