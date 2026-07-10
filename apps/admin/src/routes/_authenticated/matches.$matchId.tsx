@@ -114,8 +114,12 @@ function MatchDetailPage() {
               <Button
                 className="w-full sm:w-auto"
                 onClick={async () => {
-                  await publishMatch({ matchId: match._id })
-                  toast.success("Игра опубликована в группе")
+                  try {
+                    await publishMatch({ matchId: match._id })
+                    toast.success("Игра опубликована в группе")
+                  } catch {
+                    toast.error("Не получилось опубликовать игру")
+                  }
                 }}
               >
                 Опубликовать
@@ -146,9 +150,13 @@ function MatchDetailPage() {
                   <AlertDialogCancel>Назад</AlertDialogCancel>
                   <AlertDialogAction
                     onClick={async () => {
-                      await cancelMatch({ matchId: match._id })
-                      toast.success("Игра отменена")
-                      navigate({ to: "/matches" })
+                      try {
+                        await cancelMatch({ matchId: match._id })
+                        toast.success("Игра отменена")
+                        navigate({ to: "/matches" })
+                      } catch {
+                        toast.error("Не получилось отменить игру")
+                      }
                     }}
                   >
                     Отменить игру
@@ -188,8 +196,12 @@ function MatchDetailPage() {
                 <AlertDialogCancel>Назад</AlertDialogCancel>
                 <AlertDialogAction
                   onClick={async () => {
-                    await leaveMatch({ membershipId: myMembership._id })
-                    toast.success("Участие отменено")
+                    try {
+                      await leaveMatch({ membershipId: myMembership._id })
+                      toast.success("Участие отменено")
+                    } catch {
+                      toast.error("Не получилось отменить участие")
+                    }
                   }}
                 >
                   Не пойду
@@ -320,7 +332,13 @@ function MemberSection({
                         <AlertDialogFooter>
                           <AlertDialogCancel>Назад</AlertDialogCancel>
                           <AlertDialogAction
-                            onClick={() => removeMember({ membershipId: membership._id })}
+                            onClick={async () => {
+                              try {
+                                await removeMember({ membershipId: membership._id })
+                              } catch {
+                                toast.error("Не получилось убрать игрока")
+                              }
+                            }}
                           >
                             Убрать
                           </AlertDialogAction>
@@ -344,6 +362,7 @@ function AddGuestDialog({ matchId }: { matchId: Id<"matches"> }) {
   const [note, setNote] = useState("")
   const [level, setLevel] = useState("")
   const [open, setOpen] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -355,17 +374,25 @@ function AddGuestDialog({ matchId }: { matchId: Id<"matches"> }) {
           className="flex flex-col gap-4"
           onSubmit={async (e) => {
             e.preventDefault()
-            await addGuest({
-              matchId,
-              firstName: name,
-              guestNote: note || undefined,
-              level: level || undefined,
-            })
-            setName("")
-            setNote("")
-            setLevel("")
-            setOpen(false)
-            toast.success("Гость добавлен")
+            if (submitting) return
+            setSubmitting(true)
+            try {
+              await addGuest({
+                matchId,
+                firstName: name,
+                guestNote: note || undefined,
+                level: level || undefined,
+              })
+              setName("")
+              setNote("")
+              setLevel("")
+              setOpen(false)
+              toast.success("Гость добавлен")
+            } catch {
+              toast.error("Не получилось добавить гостя")
+            } finally {
+              setSubmitting(false)
+            }
           }}
         >
           <DialogHeader>
@@ -394,7 +421,9 @@ function AddGuestDialog({ matchId }: { matchId: Id<"matches"> }) {
             </div>
           </div>
           <DialogFooter>
-            <Button type="submit">Добавить</Button>
+            <Button type="submit" disabled={submitting}>
+              Добавить
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -448,10 +477,14 @@ function AddExistingMemberDialog({ matchId }: { matchId: Id<"matches"> }) {
                   type="button"
                   className="flex items-center justify-between gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-accent"
                   onClick={async () => {
-                    const result = await addExisting({ matchId, playerId: p._id })
-                    toast.success(result.alreadyJoined ? "Уже в игре" : "Игрок добавлен")
-                    setOpen(false)
-                    setQuery("")
+                    try {
+                      const result = await addExisting({ matchId, playerId: p._id })
+                      toast.success(result.alreadyJoined ? "Уже в игре" : "Игрок добавлен")
+                      setOpen(false)
+                      setQuery("")
+                    } catch {
+                      toast.error("Не получилось добавить игрока")
+                    }
                   }}
                 >
                   <span>

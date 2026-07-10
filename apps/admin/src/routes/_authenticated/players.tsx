@@ -27,6 +27,7 @@ import {
 import { createFileRoute, Link, Navigate } from "@tanstack/react-router"
 import { useMutation, useQuery } from "convex/react"
 import { useEffect, useRef, useState } from "react"
+import { toast } from "sonner"
 
 import StatCard from "@/components/stat-card"
 import { applyPlayersFilters, parsePlayersSearch, type PlayersType } from "@/lib/players-filters"
@@ -252,9 +253,13 @@ function PlayerRow({ player }: { player: Doc<"players"> }) {
           className="h-8 w-20"
           value={level}
           onChange={(e) => setLevel(e.target.value)}
-          onBlur={() => {
+          onBlur={async () => {
             if (level !== (player.level ?? "")) {
-              updateLevel({ playerId: player._id, level: level || undefined })
+              try {
+                await updateLevel({ playerId: player._id, level: level || undefined })
+              } catch {
+                toast.error("Не получилось сохранить уровень")
+              }
             }
           }}
         />
@@ -286,9 +291,13 @@ function PlayerRow({ player }: { player: Doc<"players"> }) {
             <AlertDialogFooter>
               <AlertDialogCancel>Назад</AlertDialogCancel>
               <AlertDialogAction
-                onClick={() => {
+                onClick={async () => {
                   if (pendingAdmin !== null) {
-                    setIsAdmin({ playerId: player._id, isAdmin: pendingAdmin })
+                    try {
+                      await setIsAdmin({ playerId: player._id, isAdmin: pendingAdmin })
+                    } catch {
+                      toast.error("Не получилось изменить права")
+                    }
                   }
                   setPendingAdmin(null)
                 }}
@@ -314,7 +323,15 @@ function PlayerRow({ player }: { player: Doc<"players"> }) {
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Назад</AlertDialogCancel>
-              <AlertDialogAction onClick={() => softDeletePlayer({ playerId: player._id })}>
+              <AlertDialogAction
+                onClick={async () => {
+                  try {
+                    await softDeletePlayer({ playerId: player._id })
+                  } catch {
+                    toast.error("Не получилось удалить игрока")
+                  }
+                }}
+              >
                 Удалить
               </AlertDialogAction>
             </AlertDialogFooter>
