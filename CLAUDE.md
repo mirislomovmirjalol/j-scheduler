@@ -25,7 +25,7 @@ on top.
 
 | Layer            | Choice                    | Notes                                                        |
 | ---------------- | ------------------------- | ----------------------------------------------------------- |
-| Web framework    | **TanStack Start**        | Admin dashboard + read-only player view.                    |
+| Web framework    | **Vite + TanStack Router** | `apps/admin` — admin dashboard + player view, client-only SPA (no SSR), better-auth cross-domain sessions straight to Convex. Replaces the original TanStack Start dashboard (`apps/web`), which is deployed but pending retirement — see TODO.md Milestone 8. |
 | Backend / DB     | **Convex**                | Reactive DB, mutations/queries, `httpAction` webhook, cron + scheduler. No separate server. |
 | Styling          | **Tailwind CSS**          | Utility-first. Keep design tokens centralized.              |
 | Messaging        | **Telegram Bot API**      | Webhook-driven (not long polling).                          |
@@ -33,8 +33,8 @@ on top.
 | Language (UI)    | **Russian**               | All user-facing strings are Russian. Code/comments English. |
 
 There is **no separate backend server**. The Telegram webhook is a Convex
-`httpAction`; reminders and the "repost buried board" logic are Convex scheduled
-functions / crons.
+`httpAction`; reminders and the manual "repost board" action are Convex
+scheduled functions / crons.
 
 ---
 
@@ -97,7 +97,8 @@ Telegram group ("игры")                     Web (TanStack Start)
   verifies Telegram's `secret_token` header, dedupes on `update_id`, then routes:
   `/start` (DM opt-in), `callback_query` (Join / waitlist taps), admin commands.
 - **Board**: a single live message per chat (`boardState`). Taps edit it in
-  place. A burial counter triggers delete-and-repost-to-bottom.
+  place. An admin can force a fresh repost (delete + resend to the bottom) from
+  the dashboard's «Отправить в группу» button (`boardState.repostToGroup`).
 - **Reminders**: on match create/reschedule we schedule T-3h / T-30m jobs and
   store their `jobId` in `matchReminders`. On reschedule we **cancel** the old
   jobs before scheduling new ones.
@@ -106,33 +107,46 @@ Telegram group ("игры")                     Web (TanStack Start)
 
 - **One** live message lists all open matches, **sorted by `startsAt`** (soonest
   first).
-- Each row shows header + live count + a Join/waitlist button. **Full rosters are
-  collapsed** — one tap (or the web view) shows them. Reason: real rosters run
-  11+ names across several matches and Telegram caps a message at **4096 chars**;
-  inline rosters overflow into multiple messages and reintroduce burial.
-- When chatter buries the board (counter past threshold), delete the old message
-  and repost at the bottom. Never spam multiple cards.
+- Each row shows header, live count, and **full inline rosters/waitlists**
+  (revised from the original "collapsed rosters" plan — the roster is the
+  information people actually open the board for). The 4096-char guard in
+  `lib/board.ts`'s `renderBoard` is the safety net: it first retries without
+  Telegram mention-links (shorter), then hard-truncates if still over. We
+  deliberately never split into multiple board messages — that reintroduces
+  the burial problem collapsing rosters originally existed to avoid.
+- Reposting is a **manual admin action**, not automatic. An earlier plan to
+  auto-repost when group chatter buried the board (a "messages since post"
+  counter past a threshold) was descoped — the manual «Отправить в группу»
+  button covers this well enough in practice, and auto-repost required
+  disabling the bot's group privacy mode, which added its own tradeoffs.
+  Revisit only if scale makes the manual button a real burden.
 
 ---
 
 ## 5. Data model
 
-See `packages/backend/convex/schema.ts` for the authoritative definition. Six
-tables:
+See `packages/backend/convex/schema.ts` for the authoritative definition.
+Seven tables:
 
 - **players** — authed users AND guests, unified. `type`, `telegramUserId`
   (null for guests), name fields, admin-assigned `level` (free text, not
   enforced in v1), `isAdmin`, `wantsDms`, `isDeleted`.
-- **matches** — `startsAt`, `durationMin`, `description`, `level` (free-text
-  range e.g. "1-2"), `court` (free text + dashboard autocomplete), `format`
+- **matches** — `startsAt`, `durationMin` (display only — reminders are
+  computed purely from `startsAt`), `description`, `level` (free-text range
+  e.g. "1-2"), `court` (free text + dashboard autocomplete), `format`
   (Американо/Мексикано/King…), `maxMembers`, `pricePerPerson`, `lundaUrl`,
   `createdBy`, `isDeleted`. **No status field** — derive open/full/past from
   `startsAt` + count.
 - **memberships** — `matchId` + `playerId`, `role` (roster|waitlist), `joinedAt`
-  ("trigger time"), `addedBy` (self | {admin}), `isDeleted`.
-- **boardState** — one per chat: `messageId`, `messagesSincePost`, `lastPostedAt`.
+  ("trigger time"), `addedBy` (self | {admin}), `isDeleted`, `removedBy`
+  (self | {admin} — who dropped it, distinct from who added it).
+- **boardState** — one per chat: `chatId`, `messageId`.
 - **matchReminders** — scheduler `jobId`s per match, so reschedule can cancel.
+  A lead skipped at scheduling time (already past when it would've been
+  scheduled) gets a `jobId`-less row with `firedAt` set immediately, so the
+  dead-man's-switch can tell "skipped on purpose" from "lost".
 - **processedUpdates** — `update_id` dedup; pruned by cron.
+- **webLoginRequests** — deep-link login one-time codes; pruned by cron.
 
 ---
 
@@ -168,7 +182,11 @@ Any code touching the Bot API must respect these. Most bugs here fail *silently*
 
 ### Convex
 - Mutations are the only write path (see Golden Rule 1). Queries are read-only.
-- Every query that filters MUST use an index (see `schema.ts`); never full-scan.
+- Prefer an index (see `schema.ts`) over a full-scan whenever a query filters
+  on a specific field. A bounded `.take(N)`/`.collect()` full scan is
+  acceptable for genuinely small, community-scale tables (e.g. `players`,
+  capped around 500) where the query needs most/all rows anyway and an index
+  wouldn't actually narrow the scan — don't add an index nothing will use.
 - Side effects that talk to Telegram go in **actions**, not mutations. Pattern:
   mutation updates DB → schedules an action → action calls the Bot API. (Mutations
   must stay deterministic and side-effect-free.)
