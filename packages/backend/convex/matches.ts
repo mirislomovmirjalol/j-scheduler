@@ -390,10 +390,25 @@ export const getMatchDetail = query({
         })),
     );
 
+    // Admin-only: who joined and then left themselves — distinct from
+    // admin removals/promotions, via removedBy (see memberships.ts).
+    const cancelled = player.isAdmin
+      ? await Promise.all(
+          memberships
+            .filter((m) => m.isDeleted && m.removedBy === "self")
+            .map(async (m) => ({
+              membership: m,
+              player: await ctx.db.get("players", m.playerId),
+            })),
+        )
+      : [];
+
     return {
       match,
       roster: members.filter((m) => m.membership.role === "roster"),
       waitlist: members.filter((m) => m.membership.role === "waitlist"),
+      cancelled,
+      myMembership: members.find((m) => m.membership.playerId === player._id)?.membership ?? null,
     };
   },
 });

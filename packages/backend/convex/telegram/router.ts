@@ -82,8 +82,39 @@ export const handleCallbackQuery = internalAction({
     // (tens of ms) to stay well inside Telegram's ~15s ack window.
     try {
       if (joinMatch) {
+        const matchId = joinMatch[1] as Id<"matches">;
+
+        // The board's single button is per-match, not per-state — its
+        // label can't differ per viewer since it's one shared message.
+        // Check the tapper's own current membership first, then dispatch:
+        // already in (roster or waitlist) -> leave; otherwise -> join.
+        const status = await ctx.runQuery(
+          internal.memberships.getMembershipStatus,
+          { matchId, telegramUserId: from.id },
+        );
+
+        if (status.isMember) {
+          const result = await ctx.runMutation(internal.memberships.dropMatch, {
+            matchId,
+            telegramUserId: from.id,
+          });
+
+          await callTelegramApi("answerCallbackQuery", {
+            callback_query_id: id,
+            text:
+              result.outcome === "not_a_member"
+                ? strings.dropNotAMember
+                : strings.dropped,
+          });
+
+          if (result.outcome !== "not_a_member") {
+            await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
+          }
+          return;
+        }
+
         const result = await ctx.runMutation(internal.memberships.joinMatch, {
-          matchId: joinMatch[1] as Id<"matches">,
+          matchId,
           telegramUserId: from.id,
           firstName: from.first_name ?? "",
           lastName: from.last_name ?? undefined,

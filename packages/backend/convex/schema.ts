@@ -116,7 +116,14 @@ export default defineSchema({
       v.object({ admin: v.id("players") }),
     ),
 
-    isDeleted: v.boolean(), // soft delete (admin removal / future self-leave)
+    isDeleted: v.boolean(), // soft delete (admin removal / self-leave)
+    // How the membership was soft-deleted — mirrors addedBy. Undefined for
+    // live rows and for rows removed before this field existed. Lets the
+    // admin dashboard's "cancelled" list show only genuine self-drops, not
+    // admin cleanup or waitlist promotions (which patch role, not isDeleted).
+    removedBy: v.optional(
+      v.union(v.literal("self"), v.object({ admin: v.id("players") })),
+    ),
   })
     .index("by_match", ["matchId"])
     .index("by_match_and_role", ["matchId", "role"])

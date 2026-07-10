@@ -1,7 +1,68 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { internalMutation, internalQuery, mutation } from "./_generated/server";
-import { findOrCreatePlayerFromTelegram, requireAdminPlayer } from "./players";
+import type { Doc, Id } from "./_generated/dataModel";
+import {
+  internalMutation,
+  internalQuery,
+  mutation,
+  type MutationCtx,
+} from "./_generated/server";
+import {
+  findOrCreatePlayerFromTelegram,
+  requireAdminPlayer,
+  requireAuthedPlayer,
+} from "./players";
+
+// Shared by every "leave" path (bot self-drop, web self-serve leave, admin
+// removal) — Golden Rule 1: one write path regardless of trigger. Records
+// who actually dropped the membership (mirrors addedBy) so the admin
+// dashboard can show a "who cancelled" list of genuine self-drops, distinct
+// from admin cleanup.
+async function dropMembership(
+  ctx: MutationCtx,
+  membership: Doc<"memberships">,
+  removedBy: "self" | { admin: Id<"players"> },
+) {
+  await ctx.db.patch("memberships", membership._id, {
+    isDeleted: true,
+    removedBy,
+  });
+
+  // A roster departure frees a seat — tell the waitlist, regardless of who
+  // triggered it. (A waitlist departure frees nothing meaningful.)
+  if (membership.role === "roster") {
+    await ctx.scheduler.runAfter(0, internal.telegram.notify.extraSeatsOpened, {
+      matchId: membership.matchId,
+    });
+  }
+}
+
+// Board toggle support: resolves whether the tapper currently has a live
+// membership for this match. Telegram's board is one shared message, so the
+// button's label can't differ per viewer — only the tap's effect can. The
+// router calls this first, then dispatches to joinMatch or dropMatch.
+export const getMembershipStatus = internalQuery({
+  args: { matchId: v.id("matches"), telegramUserId: v.number() },
+  handler: async (ctx, { matchId, telegramUserId }) => {
+    const player = await ctx.db
+      .query("players")
+      .withIndex("by_telegramUserId", (q) =>
+        q.eq("telegramUserId", telegramUserId),
+      )
+      .unique();
+    if (!player) return { isMember: false as const };
+
+    const existing = await ctx.db
+      .query("memberships")
+      .withIndex("by_match_and_player", (q) =>
+        q.eq("matchId", matchId).eq("playerId", player._id),
+      )
+      .unique();
+
+    if (!existing || existing.isDeleted) return { isMember: false as const };
+    return { isMember: true as const, role: existing.role };
+  },
+});
 
 // The Join button on the board. Auto-creates the player (without opting
 // them into DMs — see players.ts) and puts them on the roster if there's
@@ -73,10 +134,11 @@ export const joinMatch = internalMutation({
   },
 });
 
-// Self-serve drop, reached from the Drop button on a reminder DM (never
-// from the public board — v1's roster removal there stays admin-only).
-// Frees the seat; does NOT auto-promote the next waitlisted player, since
-// waitlist promotion is admin-only in v1.
+// Self-serve drop — reached from the Drop button on a reminder DM, and from
+// the board's own toggle button (router.ts checks the tapper's membership
+// state before deciding whether to call this or joinMatch). Frees the seat;
+// does NOT auto-promote the next waitlisted player, since waitlist
+// promotion is admin-only in v1.
 export const dropMatch = internalMutation({
   args: { matchId: v.id("matches"), telegramUserId: v.number() },
   handler: async (ctx, { matchId, telegramUserId }) => {
@@ -99,17 +161,29 @@ export const dropMatch = internalMutation({
       return { outcome: "not_a_member" as const };
     }
 
-    await ctx.db.patch("memberships", existing._id, { isDeleted: true });
+    await dropMembership(ctx, existing, "self");
+    return { outcome: existing.role };
+  },
+});
 
-    // A roster departure frees a seat — tell the waitlist. (A waitlist
-    // departure frees nothing meaningful, so no notification there.)
-    if (existing.role === "roster") {
-      await ctx.scheduler.runAfter(0, internal.telegram.notify.extraSeatsOpened, {
-        matchId,
-      });
+// Self-serve leave from the web dashboard — same effect as the bot's Drop
+// button, just resolved via the authed session instead of a telegramUserId.
+// Any player can drop their OWN membership; admins use removeMember for
+// anyone else's.
+export const leaveMatch = mutation({
+  args: { membershipId: v.id("memberships") },
+  handler: async (ctx, { membershipId }) => {
+    const player = await requireAuthedPlayer(ctx);
+    const membership = await ctx.db.get("memberships", membershipId);
+    if (!membership || membership.isDeleted) {
+      throw new Error("Not a member");
+    }
+    if (membership.playerId !== player._id) {
+      throw new Error("Not your membership");
     }
 
-    return { outcome: existing.role };
+    await dropMembership(ctx, membership, "self");
+    await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
   },
 });
 
@@ -119,8 +193,12 @@ export const dropMatch = internalMutation({
 export const removeMember = mutation({
   args: { membershipId: v.id("memberships") },
   handler: async (ctx, { membershipId }) => {
-    await requireAdminPlayer(ctx);
-    await ctx.db.patch("memberships", membershipId, { isDeleted: true });
+    const admin = await requireAdminPlayer(ctx);
+
+    const membership = await ctx.db.get("memberships", membershipId);
+    if (!membership || membership.isDeleted) throw new Error("Not a member");
+
+    await dropMembership(ctx, membership, { admin: admin._id });
     await ctx.scheduler.runAfter(0, internal.telegram.notify.membershipChanged, {
       membershipId,
       kind: "removed",

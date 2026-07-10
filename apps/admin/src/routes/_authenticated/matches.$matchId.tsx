@@ -54,6 +54,7 @@ function MatchDetailPage() {
   })
   const cancelMatch = useMutation(api.matches.cancelMatch)
   const publishMatch = useMutation(api.matches.publishMatch)
+  const leaveMatch = useMutation(api.memberships.leaveMatch)
   const navigate = useNavigate()
 
   if (detail === undefined) {
@@ -74,7 +75,7 @@ function MatchDetailPage() {
     return <p className="p-6 text-sm text-muted-foreground">Игра не найдена.</p>
   }
 
-  const { match, roster, waitlist } = detail
+  const { match, roster, waitlist, cancelled, myMembership } = detail
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
@@ -165,6 +166,40 @@ function MatchDetailPage() {
         waitlistCount={waitlist.length}
       />
 
+      {myMembership && (
+        <div className="flex flex-col items-start justify-between gap-3 rounded-md border border-input p-4 sm:flex-row sm:items-center">
+          <p className="text-sm">
+            Ты {myMembership.role === "roster" ? "в ростере" : "в листе ожидания"} этой игры.
+          </p>
+          <AlertDialog>
+            <AlertDialogTrigger render={<Button variant="outline" size="sm" />}>
+              Не пойду
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Отменить участие?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {myMembership.role === "roster"
+                    ? "Место освободится, лист ожидания будет уведомлён."
+                    : "Ты выйдешь из листа ожидания."}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Назад</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={async () => {
+                    await leaveMatch({ membershipId: myMembership._id })
+                    toast.success("Участие отменено")
+                  }}
+                >
+                  Не пойду
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      )}
+
       <MemberSection
         title="Ростер"
         members={roster}
@@ -180,6 +215,16 @@ function MatchDetailPage() {
         showPromote
         showActions={!!player?.isAdmin}
       />
+
+      {player?.isAdmin && cancelled.length > 0 && (
+        <MemberSection
+          title="Отказались"
+          members={cancelled}
+          emptyText=""
+          showPromote={false}
+          showActions={false}
+        />
+      )}
 
       {player?.isAdmin && (
         <div className="flex flex-wrap gap-2">
