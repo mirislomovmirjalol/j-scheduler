@@ -23,6 +23,20 @@ export const recordIfNew = internalMutation({
   },
 });
 
+// Rolls back the dedup record for an update whose handler threw, so
+// Telegram's retry (any non-200 response triggers one) is reprocessed
+// instead of being silently swallowed as "already seen".
+export const deleteByUpdateId = internalMutation({
+  args: { updateId: v.number() },
+  handler: async (ctx, { updateId }) => {
+    const existing = await ctx.db
+      .query("processedUpdates")
+      .withIndex("by_updateId", (q) => q.eq("updateId", updateId))
+      .unique();
+    if (existing) await ctx.db.delete(existing._id);
+  },
+});
+
 // Rows are inserted in increasing processedAt order, so scanning
 // oldest-first and stopping at the first still-fresh row avoids a full scan.
 export const prune = internalMutation({

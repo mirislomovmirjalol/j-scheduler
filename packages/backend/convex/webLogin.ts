@@ -100,3 +100,26 @@ export const consume = internalMutation({
     };
   },
 });
+
+// Rows are only ever meaningful within their EXPIRY_MS freshness window
+// (checked via isFresh above); nothing reads a row past that. Unlike
+// processedUpdates, this table had no prune cron, so expired/consumed codes
+// accumulated forever. Pruned on the same cadence as processedUpdates.
+const PRUNE_RETENTION_MS = 60 * 60 * 1000;
+const PRUNE_BATCH_SIZE = 200;
+
+export const prune = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const cutoff = Date.now() - PRUNE_RETENTION_MS;
+    const rows = await ctx.db
+      .query("webLoginRequests")
+      .order("asc")
+      .take(PRUNE_BATCH_SIZE);
+
+    for (const row of rows) {
+      if (row.createdAt >= cutoff) break;
+      await ctx.db.delete(row._id);
+    }
+  },
+});

@@ -80,7 +80,7 @@ export const joinMatch = internalMutation({
   },
   handler: async (ctx, args) => {
     const match = await ctx.db.get("matches", args.matchId);
-    if (!match || match.isDeleted) {
+    if (!match || match.isDeleted || !match.isPublished) {
       return { outcome: "match_gone" as const, alreadyJoined: false };
     }
 

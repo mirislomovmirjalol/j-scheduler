@@ -4,7 +4,6 @@ import { betterAuth } from "better-auth/minimal";
 
 import { components } from "./_generated/api";
 import type { DataModel } from "./_generated/dataModel";
-import { query } from "./_generated/server";
 import authConfig from "./auth.config";
 import { telegramDeepLinkLogin } from "./auth/telegramDeepLinkPlugin";
 import { telegramMiniAppLogin } from "./auth/telegramMiniAppPlugin";
@@ -69,10 +68,3 @@ function createAuth(ctx: GenericCtx<DataModel>) {
 }
 
 export { createAuth };
-
-export const getCurrentUser = query({
-  args: {},
-  handler: async (ctx) => {
-    return await authComponent.safeGetAuthUser(ctx);
-  },
-});

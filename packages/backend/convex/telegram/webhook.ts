@@ -37,14 +37,26 @@ export const telegramWebhook = httpAction(async (ctx, request) => {
     return new Response(null, { status: 200 });
   }
 
-  if (update.message) {
-    await ctx.runAction(internal.telegram.router.handleMessage, {
-      message: update.message,
+  // On a handler failure, roll back the dedup record before rethrowing —
+  // otherwise Telegram's retry (any non-200 triggers one) gets silently
+  // deduped away and the update is lost for good instead of reprocessed.
+  // joinMatch/dropMatch's idempotent design absorbs the resulting risk of a
+  // duplicate delivery landing after a successful-but-slow-to-ack attempt.
+  try {
+    if (update.message) {
+      await ctx.runAction(internal.telegram.router.handleMessage, {
+        message: update.message,
+      });
+    } else if (update.callback_query) {
+      await ctx.runAction(internal.telegram.router.handleCallbackQuery, {
+        callbackQuery: update.callback_query,
+      });
+    }
+  } catch (err) {
+    await ctx.runMutation(internal.telegram.processedUpdates.deleteByUpdateId, {
+      updateId: update.update_id,
     });
-  } else if (update.callback_query) {
-    await ctx.runAction(internal.telegram.router.handleCallbackQuery, {
-      callbackQuery: update.callback_query,
-    });
+    throw err;
   }
 
   return new Response(null, { status: 200 });

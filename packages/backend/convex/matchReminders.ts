@@ -20,7 +20,7 @@ export const markFired = internalMutation({
     const rows = await ctx.db
       .query("matchReminders")
       .withIndex("by_match", (q) => q.eq("matchId", matchId))
-      .take(10);
+      .collect();
     const row = rows.find((r) => r.kind === kind);
     if (row) {
       await ctx.db.patch("matchReminders", row._id, { firedAt: Date.now() });
@@ -50,7 +50,7 @@ export const listOverdueUnfired = internalQuery({
       const reminders = await ctx.db
         .query("matchReminders")
         .withIndex("by_match", (q) => q.eq("matchId", match._id))
-        .take(10);
+        .collect();
 
       for (const { kind, leadMs } of REMINDER_LEADS) {
         const dueAt = match.startsAt - leadMs;

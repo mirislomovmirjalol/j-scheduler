@@ -56,7 +56,6 @@ export default defineSchema({
     // DM opt-in. Flips true when the user presses /start in the bot DM,
     // flips false again if we ever get a 403 (user blocked the bot).
     wantsDms: v.boolean(),
-    reminderLeadMin: v.optional(v.number()), // personal override, opted-in only
 
     isDeleted: v.boolean(), // soft delete
     createdAt: v.number(),
@@ -69,8 +68,6 @@ export default defineSchema({
   })
     // Fast lookup on RSVP tap / DM send. (nulls for guests never queried here.)
     .index("by_telegramUserId", ["telegramUserId"])
-    .index("by_type", ["type"])
-    .index("by_isAdmin", ["isAdmin"])
     .index("by_authUserId", ["authUserId"]),
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -78,7 +75,7 @@ export default defineSchema({
   // ─────────────────────────────────────────────────────────────────────────
   matches: defineTable({
     startsAt: v.number(), // UTC epoch ms — the board sorts on this
-    durationMin: v.optional(v.number()), // e.g. 120; drives "ends at" + reminders
+    durationMin: v.optional(v.number()), // e.g. 120; display only, not used in reminder logic
 
     description: v.string(), // free text from admin
     level: v.string(), // free-text range label, e.g. "1-2"
@@ -96,7 +93,6 @@ export default defineSchema({
     isDeleted: v.boolean(), // soft delete == cancel (users see no status)
     createdAt: v.number(),
   })
-    .index("by_startsAt", ["startsAt"])
     .index("by_isDeleted_startsAt", ["isDeleted", "startsAt"]),
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -133,14 +129,19 @@ export default defineSchema({
 
   // ─────────────────────────────────────────────────────────────────────────
   // BOARD STATE — the single live "board" message per chat.
-  // Lets us edit-in-place, and repost-to-bottom when buried by chatter.
+  // Lets us edit-in-place; repost-to-bottom is a manual admin action
+  // (boardState.repostToGroup) rather than an automatic burial counter.
   // One row per Telegram chat (you have one flat chat "игры" for now).
   // ─────────────────────────────────────────────────────────────────────────
   boardState: defineTable({
     chatId: v.number(),
     messageId: v.union(v.number(), v.null()), // current board message, if any
-    messagesSincePost: v.number(), // burial counter → repost past threshold
-    lastPostedAt: v.number(),
+    // Deprecated — the automatic burial-repost feature these backed was
+    // descoped in favor of the manual repost above. No longer written;
+    // optional (not removed) only because the existing row still has them
+    // set and Convex validates stored documents against the schema.
+    messagesSincePost: v.optional(v.number()),
+    lastPostedAt: v.optional(v.number()),
   }).index("by_chatId", ["chatId"]),
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -149,11 +150,15 @@ export default defineSchema({
   // old time). Cancelled jobs are deleted outright. Fired jobs are kept
   // with `firedAt` set (briefly — pruned by a cron) rather than deleted, so
   // the dead-man's-switch can tell "never scheduled / silently failed"
-  // apart from "fired successfully".
+  // apart from "fired successfully". A lead whose fire time is already past
+  // *when we'd schedule it* (e.g. a match created inside its own T-30m
+  // window) gets a jobId-less row with firedAt set immediately — "skipped on
+  // purpose" is recorded the same way as "fired", so the dead-man's-switch
+  // doesn't mistake an intentional skip for a lost reminder.
   // ─────────────────────────────────────────────────────────────────────────
   matchReminders: defineTable({
     matchId: v.id("matches"),
-    jobId: v.id("_scheduled_functions"),
+    jobId: v.optional(v.id("_scheduled_functions")),
     kind: v.union(v.literal("t_minus_3h"), v.literal("t_minus_30m")),
     firedAt: v.optional(v.number()),
   }).index("by_match", ["matchId"]),

@@ -24,4 +24,11 @@ crons.interval(
   {},
 );
 
+crons.interval(
+  "prune web login requests",
+  { hours: 1 },
+  internal.webLogin.prune,
+  {},
+);
+
 export default crons;

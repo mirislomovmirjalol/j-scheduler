@@ -49,7 +49,8 @@ function describeDetailChanges(
 // Schedules the T-3h / T-30m reminder jobs for a match and records their
 // jobIds so a later reschedule can cancel them. A lead time that's already
 // in the past (e.g. the match starts in under 30 minutes) is skipped rather
-// than fired immediately.
+// than fired immediately — recorded with firedAt set (no jobId) so the
+// dead-man's-switch sees a deliberate skip, not a lost reminder.
 async function scheduleReminders(
   ctx: MutationCtx,
   matchId: Id<"matches">,
@@ -57,7 +58,10 @@ async function scheduleReminders(
 ) {
   for (const { kind, leadMs } of REMINDER_LEADS) {
     const fireAt = startsAt - leadMs;
-    if (fireAt <= Date.now()) continue;
+    if (fireAt <= Date.now()) {
+      await ctx.db.insert("matchReminders", { matchId, kind, firedAt: Date.now() });
+      continue;
+    }
 
     const jobId = await ctx.scheduler.runAt(
       fireAt,
@@ -126,22 +130,6 @@ export const publishMatch = mutation({
   },
 });
 
-// Reverts a published match back to draft (e.g. published by mistake).
-// Removes it from the board on the next sync.
-export const unpublishMatch = mutation({
-  args: { matchId: v.id("matches") },
-  handler: async (ctx, { matchId }) => {
-    await requireAdminPlayer(ctx);
-
-    const existing = await ctx.db.get("matches", matchId);
-    if (!existing || existing.isDeleted) throw new Error("Match not found");
-    if (!existing.isPublished) return;
-
-    await ctx.db.patch("matches", matchId, { isPublished: false });
-    await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
-  },
-});
-
 export const editMatch = mutation({
   args: {
     matchId: v.id("matches"),
@@ -168,6 +156,26 @@ export const editMatch = mutation({
       patch.startsAt !== undefined && patch.startsAt !== existing.startsAt;
     const isExtraSeats =
       patch.maxMembers !== undefined && patch.maxMembers > existing.maxMembers;
+
+    // A maxMembers decrease below the live roster count would leave the
+    // board showing a nonsensical negative spots-left with nobody demoted —
+    // auto-demotion is a policy decision (who gets bumped?) we're not making
+    // here, so just refuse the edit until the admin clears seats manually.
+    if (patch.maxMembers !== undefined && patch.maxMembers < existing.maxMembers) {
+      const rosterCount = (
+        await ctx.db
+          .query("memberships")
+          .withIndex("by_match_and_role", (q) =>
+            q.eq("matchId", matchId).eq("role", "roster"),
+          )
+          .collect()
+      ).filter((m) => !m.isDeleted).length;
+
+      if (patch.maxMembers < rosterCount) {
+        throw new Error("Сначала уберите игроков из состава");
+      }
+    }
+
     // Any other visible change — a maxMembers *decrease* counts here too,
     // since that's not the "extra seats" case above.
     const detailChanges = describeDetailChanges(patch, existing, isExtraSeats);
@@ -182,10 +190,10 @@ export const editMatch = mutation({
       const staleReminders = await ctx.db
         .query("matchReminders")
         .withIndex("by_match", (q) => q.eq("matchId", matchId))
-        .take(10);
+        .collect();
       for (const reminder of staleReminders) {
         if (reminder.firedAt !== undefined) continue;
-        await ctx.scheduler.cancel(reminder.jobId);
+        if (reminder.jobId) await ctx.scheduler.cancel(reminder.jobId);
         await ctx.db.delete("matchReminders", reminder._id);
       }
 
@@ -236,10 +244,10 @@ export const cancelMatch = mutation({
     const reminders = await ctx.db
       .query("matchReminders")
       .withIndex("by_match", (q) => q.eq("matchId", matchId))
-      .take(10);
+      .collect();
     for (const reminder of reminders) {
       if (reminder.firedAt !== undefined) continue;
-      await ctx.scheduler.cancel(reminder.jobId);
+      if (reminder.jobId) await ctx.scheduler.cancel(reminder.jobId);
       await ctx.db.delete("matchReminders", reminder._id);
     }
 

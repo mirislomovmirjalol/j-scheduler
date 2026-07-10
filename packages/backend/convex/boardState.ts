@@ -13,8 +13,7 @@ export const get = internalQuery({
   },
 });
 
-// Records the board message just posted/reposted, and resets the burial
-// counter (Milestone 6 increments it on group chatter).
+// Records the board message just posted/reposted.
 export const setMessage = internalMutation({
   args: { chatId: v.number(), messageId: v.number() },
   handler: async (ctx, { chatId, messageId }) => {
@@ -24,18 +23,9 @@ export const setMessage = internalMutation({
       .unique();
 
     if (existing) {
-      await ctx.db.patch("boardState", existing._id, {
-        messageId,
-        messagesSincePost: 0,
-        lastPostedAt: Date.now(),
-      });
+      await ctx.db.patch("boardState", existing._id, { messageId });
     } else {
-      await ctx.db.insert("boardState", {
-        chatId,
-        messageId,
-        messagesSincePost: 0,
-        lastPostedAt: Date.now(),
-      });
+      await ctx.db.insert("boardState", { chatId, messageId });
     }
   },
 });
