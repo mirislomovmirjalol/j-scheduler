@@ -1,0 +1,6 @@
+{
+  "installCommand": "bun install",
+  "buildCommand": "bun run build --filter=admin",
+  "outputDirectory": "apps/admin/dist",
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+}
