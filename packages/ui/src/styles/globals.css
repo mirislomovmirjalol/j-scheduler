@@ -51,6 +51,12 @@
 }
 
 :root {
+  /* Ties the browser's own chrome (mobile overscroll/bounce fill, scrollbars,
+     form controls) to the actual active theme. Without this, the browser
+     assumes light by default regardless of the .dark class below, so
+     scrolling past the top/bottom of the page in dark mode flashes the
+     browser's native light-canvas fill instead of --background. */
+  color-scheme: light;
   --background: oklch(1 0 0);
   --foreground: oklch(0.141 0.005 285.823);
   --card: oklch(1 0 0);
@@ -86,6 +92,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --background: oklch(0.141 0.005 285.823);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.21 0.006 285.885);
@@ -131,7 +138,7 @@
     cursor: pointer;
   }
   html {
-    @apply font-sans;
+    @apply bg-background font-sans;
   }
 }
 
