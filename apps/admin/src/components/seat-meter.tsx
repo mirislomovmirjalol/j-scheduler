@@ -1,5 +1,7 @@
-import { Badge } from "@J-schedule/ui/components/badge"
 import { cn } from "@J-schedule/ui/lib/utils"
+
+import DigitGroup from "@/components/digit-group"
+import PresenceBadge from "@/components/presence-badge"
 
 // The dashboard's signature element: exact court occupancy as discrete
 // seat cells (filled = roster, outlined = open), with a waitlist count
@@ -31,10 +33,13 @@ export default function SeatMeter({
           />
         ))}
       </div>
-      <span className="text-sm tabular-nums text-muted-foreground">
-        {rosterCount}/{maxMembers}
-      </span>
-      {waitlistCount > 0 && <Badge variant="secondary">+{waitlistCount} ожид.</Badge>}
+      <DigitGroup
+        value={`${rosterCount}/${maxMembers}`}
+        className="text-sm tabular-nums text-muted-foreground"
+      />
+      <PresenceBadge show={waitlistCount > 0} variant="secondary">
+        +{waitlistCount} ожид.
+      </PresenceBadge>
     </div>
   )
 }

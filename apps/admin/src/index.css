@@ -1,4 +1,5 @@
 @import "@J-schedule/ui/globals.css";
+@import "./styles/transitions.css";
 
 /* packages/ui's shared components are deliberately sharp (rounded-none) —
    that's shared with apps/web, so it stays as-is there. apps/admin wants a

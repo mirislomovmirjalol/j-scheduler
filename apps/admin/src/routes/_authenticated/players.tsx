@@ -29,7 +29,9 @@ import { useMutation, useQuery } from "convex/react"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
+import Reveal from "@/components/reveal"
 import StatCard from "@/components/stat-card"
+import SuccessCheck from "@/components/success-check"
 import { applyPlayersFilters, parsePlayersSearch, type PlayersType } from "@/lib/players-filters"
 import { useAdminGuard } from "@/lib/use-admin-guard"
 import { useDebouncedValue } from "@/lib/use-debounced-value"
@@ -199,24 +201,28 @@ function PlayersPage() {
             </div>
           ))}
         </div>
-      ) : filtered && filtered.length === 0 && players.length > 0 ? (
-        <p className="text-sm text-muted-foreground">Никого не найдено по этим фильтрам.</p>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Игрок</TableHead>
-              <TableHead>Уровень</TableHead>
-              <TableHead>Админ</TableHead>
-              <TableHead className="text-right">Действия</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(filtered ?? players).map((p) => (
-              <PlayerRow key={p._id} player={p} />
-            ))}
-          </TableBody>
-        </Table>
+        <Reveal>
+          {filtered && filtered.length === 0 && players.length > 0 ? (
+            <p className="text-sm text-muted-foreground">Никого не найдено по этим фильтрам.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Игрок</TableHead>
+                  <TableHead>Уровень</TableHead>
+                  <TableHead>Админ</TableHead>
+                  <TableHead className="text-right">Действия</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(filtered ?? players).map((p) => (
+                  <PlayerRow key={p._id} player={p} />
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </Reveal>
       )}
     </div>
   )
@@ -228,6 +234,8 @@ function PlayerRow({ player }: { player: Doc<"players"> }) {
   const softDeletePlayer = useMutation(api.players.softDeletePlayer)
   const [level, setLevel] = useState(player.level ?? "")
   const [pendingAdmin, setPendingAdmin] = useState<boolean | null>(null)
+  const [savedToken, setSavedToken] = useState(0)
+  const [adminSavedToken, setAdminSavedToken] = useState(0)
 
   return (
     <TableRow>
@@ -249,26 +257,33 @@ function PlayerRow({ player }: { player: Doc<"players"> }) {
         )}
       </TableCell>
       <TableCell>
-        <Input
-          className="h-8 w-20"
-          value={level}
-          onChange={(e) => setLevel(e.target.value)}
-          onBlur={async () => {
-            if (level !== (player.level ?? "")) {
-              try {
-                await updateLevel({ playerId: player._id, level: level || undefined })
-              } catch {
-                toast.error("Не получилось сохранить уровень")
+        <div className="flex items-center gap-1.5">
+          <Input
+            className="h-8 w-20"
+            value={level}
+            onChange={(e) => setLevel(e.target.value)}
+            onBlur={async () => {
+              if (level !== (player.level ?? "")) {
+                try {
+                  await updateLevel({ playerId: player._id, level: level || undefined })
+                  setSavedToken((t) => t + 1)
+                } catch {
+                  toast.error("Не получилось сохранить уровень")
+                }
               }
-            }
-          }}
-        />
+            }}
+          />
+          <SuccessCheck trigger={savedToken} />
+        </div>
       </TableCell>
       <TableCell>
-        <Checkbox
-          checked={player.isAdmin}
-          onCheckedChange={(checked) => setPendingAdmin(checked === true)}
-        />
+        <div className="flex items-center gap-1.5">
+          <Checkbox
+            checked={player.isAdmin}
+            onCheckedChange={(checked) => setPendingAdmin(checked === true)}
+          />
+          <SuccessCheck trigger={adminSavedToken} />
+        </div>
         <AlertDialog
           open={pendingAdmin !== null}
           onOpenChange={(open) => {
@@ -295,6 +310,7 @@ function PlayerRow({ player }: { player: Doc<"players"> }) {
                   if (pendingAdmin !== null) {
                     try {
                       await setIsAdmin({ playerId: player._id, isAdmin: pendingAdmin })
+                      setAdminSavedToken((t) => t + 1)
                     } catch {
                       toast.error("Не получилось изменить права")
                     }

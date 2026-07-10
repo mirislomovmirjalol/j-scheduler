@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@J-schedule/ui/compone
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useQuery } from "convex/react"
 
+import DigitGroup from "@/components/digit-group"
 import MatchCalendarHeatmap from "@/components/match-calendar-heatmap"
 import { FillRateTrendChart, MatchesPerMonthChart } from "@/components/match-trend-charts"
 import StatCard from "@/components/stat-card"
@@ -162,7 +163,7 @@ function MatchPreviewList({
             >
               <span className="capitalize">{formatTashkentDateTime(match.startsAt, "short")}</span>
               <span className="text-muted-foreground">
-                {match.court} · {roster.length}/{match.maxMembers}
+                {match.court} · <DigitGroup value={`${roster.length}/${match.maxMembers}`} />
               </span>
             </Link>
           ))

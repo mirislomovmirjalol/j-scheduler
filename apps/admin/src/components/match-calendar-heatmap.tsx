@@ -2,6 +2,9 @@ import { useMemo, useState } from "react"
 import { createPortal } from "react-dom"
 
 import { tashkentDayIndex, tashkentDayIndexToDate } from "@/lib/tashkent-time"
+import { usePresence } from "@/lib/use-presence"
+
+const TOOLTIP_CLOSE_MS = 50
 
 const WEEKS_TO_SHOW = 53
 // Cell + gap footprint in px — kept uniform across breakpoints (not shrunk
@@ -60,6 +63,11 @@ export default function MatchCalendarHeatmap({ matches }: { matches: CalendarMat
   // gets cut off for any cell near the top edge. Fixed-position + portal
   // sidesteps the whole containing-block problem.
   const [hover, setHover] = useState<HoverState | null>(null)
+  const [lastHover, setLastHover] = useState<HoverState | null>(null)
+  const { rendered: tooltipRendered, open: tooltipOpen } = usePresence(
+    hover !== null,
+    TOOLTIP_CLOSE_MS,
+  )
 
   const { weeks, monthMarkers, maxAttendees } = useMemo(() => {
     const dayTotals = new Map<number, { matchCount: number; attendees: number }>()
@@ -154,12 +162,16 @@ export default function MatchCalendarHeatmap({ matches }: { matches: CalendarMat
                       style={{ width: CELL_PX, height: CELL_PX }}
                       onMouseEnter={(e) => {
                         const rect = e.currentTarget.getBoundingClientRect()
-                        setHover({ x: rect.left + rect.width / 2, y: rect.top, text })
+                        const next = { x: rect.left + rect.width / 2, y: rect.top, text }
+                        setHover(next)
+                        setLastHover(next)
                       }}
                       onMouseLeave={() => setHover(null)}
                       onFocus={(e) => {
                         const rect = e.currentTarget.getBoundingClientRect()
-                        setHover({ x: rect.left + rect.width / 2, y: rect.top, text })
+                        const next = { x: rect.left + rect.width / 2, y: rect.top, text }
+                        setHover(next)
+                        setLastHover(next)
                       }}
                       onBlur={() => setHover(null)}
                     />
@@ -171,13 +183,16 @@ export default function MatchCalendarHeatmap({ matches }: { matches: CalendarMat
         </div>
       </div>
 
-      {hover &&
+      {tooltipRendered &&
+        lastHover &&
         createPortal(
           <div
-            className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full rounded-md bg-foreground px-2 py-1 text-xs whitespace-nowrap text-background"
-            style={{ left: hover.x, top: hover.y - 6 }}
+            className={`t-tt-floating pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full rounded-md bg-foreground px-2 py-1 text-xs whitespace-nowrap text-background ${
+              tooltipOpen ? "is-open" : ""
+            }`}
+            style={{ left: lastHover.x, top: lastHover.y - 6 }}
           >
-            {hover.text}
+            {lastHover.text}
           </div>,
           document.body,
         )}

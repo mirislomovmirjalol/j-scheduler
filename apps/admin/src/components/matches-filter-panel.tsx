@@ -1,4 +1,3 @@
-import { Badge } from "@J-schedule/ui/components/badge"
 import { Button } from "@J-schedule/ui/components/button"
 import {
   Drawer,
@@ -19,6 +18,7 @@ import {
 import { useState } from "react"
 
 import MatchesFilterBar from "@/components/matches-filter-bar"
+import PresenceBadge from "@/components/presence-badge"
 import type { MatchesSearch } from "@/lib/matches-filters"
 import { clearedMatchesFilters, countActiveMatchesFilters } from "@/lib/matches-filters"
 import { useMediaQuery } from "@/lib/use-media-query"
@@ -48,7 +48,9 @@ export default function MatchesFilterPanel({
   const trigger = (
     <Button variant="outline" className="gap-2">
       Фильтры
-      {activeCount > 0 && <Badge variant="secondary">{activeCount}</Badge>}
+      <PresenceBadge show={activeCount > 0} variant="secondary">
+        {activeCount}
+      </PresenceBadge>
     </Button>
   )
 

@@ -1,6 +1,8 @@
 import { Card, CardContent } from "@J-schedule/ui/components/card"
 import { Link } from "@tanstack/react-router"
 
+import DigitGroup from "@/components/digit-group"
+
 // Small at-a-glance number used across the dashboard/matches/players/history
 // stat strips — a label and a value, nothing else. Kept tiny on purpose:
 // these are summary counts, not a chart or a second page of detail.
@@ -31,7 +33,7 @@ export default function StatCard({
 }) {
   const content = (
     <CardContent className="flex flex-col gap-1 p-4">
-      <span className="text-2xl font-semibold tabular-nums tracking-tight">{value}</span>
+      <DigitGroup value={value} className="text-2xl font-semibold tabular-nums tracking-tight" />
       <span className="text-xs text-muted-foreground uppercase">{label}</span>
     </CardContent>
   )

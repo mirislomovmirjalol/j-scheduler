@@ -7,6 +7,7 @@ import { toast } from "sonner"
 
 import BackButton from "@/components/back-button"
 import MatchForm from "@/components/match-form"
+import Reveal from "@/components/reveal"
 import { defaultMatchFormValues, matchFormValuesToArgs } from "@/lib/match-form-values"
 import { useAdminGuard } from "@/lib/use-admin-guard"
 
@@ -33,7 +34,7 @@ function NewMatchPage() {
   if (!player?.isAdmin) return <Navigate to="/matches" />
 
   return (
-    <div className="mx-auto flex max-w-lg flex-col p-6">
+    <Reveal className="mx-auto flex max-w-lg flex-col p-6">
       <BackButton />
       <h1 className="mt-4 mb-6 text-2xl font-semibold tracking-tight">Новая игра</h1>
       <MatchForm
@@ -54,6 +55,6 @@ function NewMatchPage() {
           }
         }}
       />
-    </div>
+    </Reveal>
   )
 }

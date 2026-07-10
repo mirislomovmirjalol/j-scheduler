@@ -9,9 +9,13 @@ import { useMutation, useQuery } from "convex/react"
 import { useState } from "react"
 import { toast } from "sonner"
 
+import DigitGroup from "@/components/digit-group"
+import DraftBadge from "@/components/draft-badge"
 import MatchesActiveFilters from "@/components/matches-active-filters"
 import MatchesFilterPanel from "@/components/matches-filter-panel"
+import Reveal from "@/components/reveal"
 import StatCard from "@/components/stat-card"
+import TextSwap from "@/components/text-swap"
 import { formatTashkentDateTime } from "@/lib/format"
 import { applyMatchesFilters, parseMatchesSearch } from "@/lib/matches-filters"
 
@@ -59,7 +63,7 @@ function MatchesList() {
                 }
               }}
             >
-              {reposting ? "Отправляем…" : "Отправить в группу"}
+              <TextSwap>{reposting ? "Отправляем…" : "Отправить в группу"}</TextSwap>
             </Button>
             <Button render={<Link to="/matches/new" />} className="flex-1 sm:flex-none">
               + Новая игра
@@ -131,85 +135,89 @@ function MatchesList() {
             </Card>
           ))}
         </div>
-      ) : matches.length === 0 ? (
-        <Empty>
-          <EmptyTitle>Пока нет игр</EmptyTitle>
-          <EmptyDescription>
-            {player?.isAdmin
-              ? "Создай первую игру, и она появится на доске в группе."
-              : "Как только админ создаст игру, она появится здесь."}
-          </EmptyDescription>
-          {player?.isAdmin && (
-            <Button render={<Link to="/matches/new" />} className="mt-4">
-              + Новая игра
-            </Button>
-          )}
-        </Empty>
-      ) : filtered && filtered.length === 0 ? (
-        <Empty>
-          <EmptyTitle>Нет игр по этим фильтрам</EmptyTitle>
-          <EmptyDescription>Попробуй сбросить или изменить фильтры.</EmptyDescription>
-        </Empty>
       ) : (
-        <div className="flex flex-col gap-4">
-          {filtered!.map(({ match, roster, waitlist }) => (
-            <Link key={match._id} to="/matches/$matchId" params={{ matchId: match._id }}>
-              <Card className="transition-colors hover:bg-secondary">
-                <CardHeader>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <CardTitle className="text-base font-medium capitalize">
-                      {formatTashkentDateTime(match.startsAt, "long")}
-                    </CardTitle>
-                    {player?.isAdmin && !match.isPublished && (
-                      <Badge className="text-primary">Черновик</Badge>
-                    )}
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {match.court} · {match.format} · Уровень {match.level}
-                    {match.pricePerPerson ? ` · ${match.pricePerPerson} с человека` : ""}
-                  </p>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-3">
-                  {match.description && (
-                    <p className="text-sm text-muted-foreground">{match.description}</p>
-                  )}
-
-                  <div>
-                    <p className="mb-1.5 text-xs font-medium text-muted-foreground uppercase">
-                      Ростер ({roster.length}/{match.maxMembers})
-                    </p>
-                    {roster.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">Пока никто не записался.</p>
-                    ) : (
-                      <div className="flex flex-wrap gap-1.5">
-                        {roster.map(({ player: p }, i) => (
-                          <Badge key={i} variant="secondary">
-                            {playerName(p)}
-                          </Badge>
-                        ))}
+        <Reveal>
+          {matches.length === 0 ? (
+            <Empty>
+              <EmptyTitle>Пока нет игр</EmptyTitle>
+              <EmptyDescription>
+                {player?.isAdmin
+                  ? "Создай первую игру, и она появится на доске в группе."
+                  : "Как только админ создаст игру, она появится здесь."}
+              </EmptyDescription>
+              {player?.isAdmin && (
+                <Button render={<Link to="/matches/new" />} className="mt-4">
+                  + Новая игра
+                </Button>
+              )}
+            </Empty>
+          ) : filtered && filtered.length === 0 ? (
+            <Empty>
+              <EmptyTitle>Нет игр по этим фильтрам</EmptyTitle>
+              <EmptyDescription>Попробуй сбросить или изменить фильтры.</EmptyDescription>
+            </Empty>
+          ) : (
+            <div className="flex flex-col gap-4">
+              {filtered!.map(({ match, roster, waitlist }) => (
+                <Link key={match._id} to="/matches/$matchId" params={{ matchId: match._id }}>
+                  <Card className="transition-colors hover:bg-secondary">
+                    <CardHeader>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <CardTitle className="text-base font-medium capitalize">
+                          {formatTashkentDateTime(match.startsAt, "long")}
+                        </CardTitle>
+                        {player?.isAdmin && <DraftBadge show={!match.isPublished} />}
                       </div>
-                    )}
-                  </div>
-
-                  {waitlist.length > 0 && (
-                    <div>
-                      <p className="mb-1.5 text-xs font-medium text-muted-foreground uppercase">
-                        Лист ожидания ({waitlist.length})
+                      <p className="text-sm text-muted-foreground">
+                        {match.court} · {match.format} · Уровень {match.level}
+                        {match.pricePerPerson ? ` · ${match.pricePerPerson} с человека` : ""}
                       </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {waitlist.map(({ player: p }, i) => (
-                          <Badge key={i} variant="outline">
-                            {playerName(p)}
-                          </Badge>
-                        ))}
+                    </CardHeader>
+                    <CardContent className="flex flex-col gap-3">
+                      {match.description && (
+                        <p className="text-sm text-muted-foreground">{match.description}</p>
+                      )}
+
+                      <div>
+                        <p className="mb-1.5 text-xs font-medium text-muted-foreground uppercase">
+                          Ростер (<DigitGroup value={`${roster.length}/${match.maxMembers}`} />)
+                        </p>
+                        {roster.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">
+                            Пока никто не записался.
+                          </p>
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5">
+                            {roster.map(({ player: p }, i) => (
+                              <Badge key={i} variant="secondary">
+                                {playerName(p)}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
-        </div>
+
+                      {waitlist.length > 0 && (
+                        <div>
+                          <p className="mb-1.5 text-xs font-medium text-muted-foreground uppercase">
+                            Лист ожидания (<DigitGroup value={waitlist.length} />)
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {waitlist.map(({ player: p }, i) => (
+                              <Badge key={i} variant="outline">
+                                {playerName(p)}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </Link>
+              ))}
+            </div>
+          )}
+        </Reveal>
       )}
     </div>
   )

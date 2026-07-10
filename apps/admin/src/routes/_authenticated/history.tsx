@@ -1,14 +1,13 @@
 import { api } from "@J-schedule/backend/convex/_generated/api"
-import { Badge } from "@J-schedule/ui/components/badge"
 import { Card, CardContent } from "@J-schedule/ui/components/card"
-import { Empty, EmptyDescription, EmptyTitle } from "@J-schedule/ui/components/empty"
 import { Skeleton } from "@J-schedule/ui/components/skeleton"
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "convex/react"
 import { useState } from "react"
 
+import MatchHistoryList from "@/components/match-history-list"
+import Reveal from "@/components/reveal"
 import StatCard from "@/components/stat-card"
-import { formatTashkentDateTime } from "@/lib/format"
 
 export const Route = createFileRoute("/_authenticated/history")({
   component: HistoryPage,
@@ -63,37 +62,18 @@ function HistoryPage() {
             </Card>
           ))}
         </div>
-      ) : history.length === 0 ? (
-        <Empty>
-          <EmptyTitle>Пока нет прошедших игр</EmptyTitle>
-          <EmptyDescription>
-            Сыгранные игры, в которых ты участвовал(-а), появятся здесь.
-          </EmptyDescription>
-        </Empty>
-      ) : visible && visible.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Нет игр в этой категории.</p>
       ) : (
-        <ul className="flex flex-col gap-2">
-          {visible?.map(({ membership, match }) => (
-            <li key={membership._id}>
-              <Card>
-                <CardContent className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="font-medium">
-                      {formatTashkentDateTime(match.startsAt, "short")}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      {match.court} · {match.format} · Уровень {match.level}
-                    </p>
-                  </div>
-                  <Badge variant={membership.role === "roster" ? "secondary" : "outline"}>
-                    {membership.role === "roster" ? "играл(а)" : "лист ожидания"}
-                  </Badge>
-                </CardContent>
-              </Card>
-            </li>
-          ))}
-        </ul>
+        <Reveal>
+          {visible && visible.length === 0 && history.length > 0 ? (
+            <p className="text-sm text-muted-foreground">Нет игр в этой категории.</p>
+          ) : (
+            <MatchHistoryList
+              entries={visible ?? []}
+              emptyTitle="Пока нет прошедших игр"
+              emptyDescription="Сыгранные игры, в которых ты участвовал(-а), появятся здесь."
+            />
+          )}
+        </Reveal>
       )}
     </div>
   )

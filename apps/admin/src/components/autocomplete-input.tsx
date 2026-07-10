@@ -1,6 +1,10 @@
 import { Input } from "@J-schedule/ui/components/input"
 import { useState } from "react"
 
+import { usePresence } from "@/lib/use-presence"
+
+const DROPDOWN_CLOSE_MS = 150
+
 // Native <input list="..."> datalist suggestions don't render on iOS
 // Safari at all (a longstanding WebKit gap), which is where this
 // database-backed autocomplete matters most on a phone. This is a small
@@ -23,6 +27,8 @@ export default function AutocompleteInput({
   const filtered = (options ?? []).filter(
     (option) => option !== value && option.toLowerCase().includes(value.toLowerCase()),
   )
+  const showDropdown = open && filtered.length > 0
+  const { rendered, closing } = usePresence(showDropdown, DROPDOWN_CLOSE_MS)
 
   return (
     <div className="relative">
@@ -38,8 +44,13 @@ export default function AutocompleteInput({
         onBlur={() => setOpen(false)}
         {...inputProps}
       />
-      {open && filtered.length > 0 && (
-        <div className="absolute top-full right-0 left-0 z-10 mt-1 max-h-48 overflow-auto rounded-md border bg-popover shadow-md">
+      {rendered && (
+        <div
+          className={`t-dropdown absolute top-full right-0 left-0 z-10 mt-1 max-h-48 overflow-auto rounded-md border bg-popover shadow-md ${
+            showDropdown ? "is-open" : ""
+          } ${closing ? "is-closing" : ""}`}
+          data-origin="top-center"
+        >
           {filtered.map((option) => (
             <button
               key={option}

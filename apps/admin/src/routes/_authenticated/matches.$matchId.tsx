@@ -38,7 +38,12 @@ import { useState } from "react"
 import { toast } from "sonner"
 
 import BackButton from "@/components/back-button"
+import DigitGroup from "@/components/digit-group"
+import DraftBadge from "@/components/draft-badge"
+import Reveal from "@/components/reveal"
 import SeatMeter from "@/components/seat-meter"
+import ShakeField from "@/components/shake-field"
+import TextSwap from "@/components/text-swap"
 import { formatTashkentDateTime } from "@/lib/format"
 import { useDebouncedValue } from "@/lib/use-debounced-value"
 
@@ -78,7 +83,7 @@ function MatchDetailPage() {
   const { match, roster, waitlist, cancelled, myMembership } = detail
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
+    <Reveal className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
       <BackButton />
       <div className="flex flex-col items-start justify-between gap-4 sm:flex-row">
         <div>
@@ -86,9 +91,7 @@ function MatchDetailPage() {
             <h1 className="text-2xl font-semibold tracking-tight capitalize">
               {formatTashkentDateTime(match.startsAt, "long")}
             </h1>
-            {player?.isAdmin && !match.isPublished && (
-              <Badge className="text-primary">Черновик</Badge>
-            )}
+            {player?.isAdmin && <DraftBadge show={!match.isPublished} />}
           </div>
           <p className="text-sm text-muted-foreground">
             {match.court} · {match.format} · Уровень {match.level}
@@ -244,7 +247,7 @@ function MatchDetailPage() {
           <AddGuestDialog matchId={match._id} />
         </div>
       )}
-    </div>
+    </Reveal>
   )
 }
 
@@ -267,7 +270,10 @@ function MemberSection({
   return (
     <div>
       <h2 className="mb-2 text-lg font-medium">
-        {title} <span className="text-muted-foreground">({members.length})</span>
+        {title}{" "}
+        <span className="text-muted-foreground">
+          (<DigitGroup value={members.length} />)
+        </span>
       </h2>
       {members.length === 0 ? (
         <p className="text-sm text-muted-foreground">{emptyText}</p>
@@ -363,6 +369,8 @@ function AddGuestDialog({ matchId }: { matchId: Id<"matches"> }) {
   const [level, setLevel] = useState("")
   const [open, setOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [nameError, setNameError] = useState<string | undefined>(undefined)
+  const [submitAttempt, setSubmitAttempt] = useState(0)
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -372,9 +380,15 @@ function AddGuestDialog({ matchId }: { matchId: Id<"matches"> }) {
       <DialogContent>
         <form
           className="flex flex-col gap-4"
+          noValidate
           onSubmit={async (e) => {
             e.preventDefault()
             if (submitting) return
+            if (!name.trim()) {
+              setNameError("Укажи имя")
+              setSubmitAttempt((a) => a + 1)
+              return
+            }
             setSubmitting(true)
             try {
               await addGuest({
@@ -401,13 +415,18 @@ function AddGuestDialog({ matchId }: { matchId: Id<"matches"> }) {
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="guestName">Имя</Label>
-              <Input
-                id="guestName"
-                required
-                autoFocus
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
+              <ShakeField error={nameError} attempt={submitAttempt}>
+                <Input
+                  id="guestName"
+                  autoFocus
+                  aria-invalid={!!nameError}
+                  value={name}
+                  onChange={(e) => {
+                    setName(e.target.value)
+                    if (nameError) setNameError(undefined)
+                  }}
+                />
+              </ShakeField>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="flex flex-col gap-1.5">
@@ -422,7 +441,7 @@ function AddGuestDialog({ matchId }: { matchId: Id<"matches"> }) {
           </div>
           <DialogFooter>
             <Button type="submit" disabled={submitting}>
-              Добавить
+              <TextSwap>{submitting ? "Добавляем…" : "Добавить"}</TextSwap>
             </Button>
           </DialogFooter>
         </form>

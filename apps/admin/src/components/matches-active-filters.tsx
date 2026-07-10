@@ -47,7 +47,7 @@ export default function MatchesActiveFilters({
         <button
           key={key}
           type="button"
-          className="flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs text-foreground transition-colors hover:bg-secondary"
+          className="t-chip flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs text-foreground transition-colors hover:bg-secondary"
           onClick={() => onRemove(key)}
         >
           {text}
