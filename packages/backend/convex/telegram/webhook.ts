@@ -20,13 +20,18 @@ export const telegramWebhook = httpAction(async (ctx, request) => {
 
   // CLAUDE.md §9: log every inbound update — a dead webhook otherwise fails
   // silently. Chat id specifically is also how you find a group's chat id
-  // in the first place (Telegram has no "look up chat id" API otherwise).
+  // in the first place (Telegram has no "look up chat id" API otherwise) —
+  // same trick applies to a forum topic's message_thread_id.
   const chat = update.message?.chat ?? update.callback_query?.message?.chat;
+  const topicId =
+    update.message?.message_thread_id ??
+    update.callback_query?.message?.message_thread_id;
   console.log("telegram update", {
     updateId: update.update_id,
     type: update.message ? "message" : update.callback_query ? "callback_query" : "other",
     chatId: chat?.id,
     chatType: chat?.type,
+    topicId,
   });
 
   const isNew = await ctx.runMutation(

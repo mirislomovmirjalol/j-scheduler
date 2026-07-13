@@ -21,6 +21,12 @@ export const syncBoard = internalAction({
       return;
     }
     const chatId = Number(chatIdEnv);
+    // Optional: pins the board to a specific forum topic (e.g. "Игры")
+    // instead of the group's default/General thread. Unset by default so
+    // non-forum groups (or groups where this isn't configured) behave
+    // exactly as before.
+    const topicIdEnv = process.env.TELEGRAM_TOPIC_ID;
+    const topicId = topicIdEnv ? Number(topicIdEnv) : undefined;
 
     const [matches, settings] = await Promise.all([
       ctx.runQuery(internal.matches.listOpenWithRosterCounts, {}),
@@ -74,6 +80,7 @@ export const syncBoard = internalAction({
         text,
         parse_mode: "HTML",
         reply_markup: { inline_keyboard: buttons },
+        ...(topicId !== undefined ? { message_thread_id: topicId } : {}),
       },
     );
 
@@ -81,5 +88,24 @@ export const syncBoard = internalAction({
       chatId,
       messageId: sent.message_id,
     });
+
+    // Only pin on an explicit force-repost (the admin's "Отправить в
+    // группу" button) — not on every auto-triggered fresh post (first
+    // board ever, or an edit that failed because the old message was
+    // gone), so the pin stays a deliberate admin action rather than
+    // something that can fire unattended off a join/leave tap.
+    if (force) {
+      // Best-effort — bot may lack pin rights (CLAUDE.md #6: degrade
+      // gracefully, never throw into the user's face over this).
+      try {
+        await callTelegramApi("pinChatMessage", {
+          chat_id: chatId,
+          message_id: sent.message_id,
+          disable_notification: true,
+        });
+      } catch (err) {
+        console.error("pinChatMessage failed, board still posted fine", err);
+      }
+    }
   },
 });
