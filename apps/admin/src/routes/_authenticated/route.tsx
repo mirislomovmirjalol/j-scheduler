@@ -1,4 +1,3 @@
-import { Separator } from "@J-schedule/ui/components/separator"
 import {
   SidebarInset,
   SidebarProvider,
@@ -31,7 +30,6 @@ function AuthenticatedLayout() {
       <SidebarInset>
         <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
           <SidebarTrigger size="icon-lg" className="-ml-1" />
-          <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
           <h1 className="text-sm font-medium text-foreground">{title}</h1>
           <div className="ml-auto">
             <UserMenu />
