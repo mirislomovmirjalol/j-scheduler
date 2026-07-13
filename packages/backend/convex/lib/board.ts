@@ -65,6 +65,7 @@ export type RenderedBoard = {
 // and, having no tags, safe to further truncate if even that overflows.
 export function renderBoard(
   matches: MatchWithRosterCount[],
+  paymentInfo?: string,
   withLinks = true,
 ): RenderedBoard {
   if (matches.length === 0) {
@@ -129,6 +130,10 @@ export function renderBoard(
     ]);
   });
 
+  if (paymentInfo) {
+    lines.push(`💳 ${escapeHtml(paymentInfo)}`, "");
+  }
+
   const text = lines.join("\n").trimEnd();
 
   if (text.length > MAX_MESSAGE_LENGTH) {
@@ -136,7 +141,7 @@ export function renderBoard(
       // Retry without mention-link markup — shorter, and safe to further
       // truncate below since there are no tags left to accidentally cut
       // through.
-      return renderBoard(matches, false);
+      return renderBoard(matches, paymentInfo, false);
     }
     console.error("board text exceeds Telegram's 4096-char limit", {
       length: text.length,

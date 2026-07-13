@@ -34,4 +34,23 @@ export const strings = {
   removedFromMatch: (dateTime: string) => `Тебя убрали из игры ${dateTime}.`,
   promotedFromWaitlist: (dateTime: string) =>
     `🎉 Место освободилось — ты в ростере на игру ${dateTime}!`,
+
+  matchesCommandDescription: "Все открытые игры",
+  myCommandDescription: "Игры, на которые я записан(а)",
+  noOpenMatches: "Сейчас нет открытых игр 🙌",
+  openMatchesHeader: "🎾 Открытые игры",
+  matchLine: (params: { dateTime: string; court: string; format: string; level: string; rosterCount: number; maxMembers: number }) =>
+    `${params.dateTime} · ${params.court} · ${params.format} · Уровень ${params.level} · 👥 ${params.rosterCount}/${params.maxMembers}`,
+  noPersonalMatches: "Ты пока никуда не записывался(-ась) 🤷",
+  myMatchesHeader: "🎾 Твои игры",
+  myMatchLine: (params: { dateTime: string; court: string; isPast: boolean; role: "roster" | "waitlist" }) =>
+    `${params.isPast ? "✅" : "📅"} ${params.dateTime} · ${params.court}${
+      params.role === "waitlist" ? " · лист ожидания" : ""
+    }`,
+  myMatchesTruncated: (shown: number, total: number) =>
+    `\n…и ещё ${total - shown}.`,
+
+  payCommandDescription: "Реквизиты для оплаты",
+  noPaymentInfo: "Админ пока не указал реквизиты для оплаты.",
+  paymentInfo: (text: string) => `💳 Реквизиты для оплаты:\n${text}`,
 };

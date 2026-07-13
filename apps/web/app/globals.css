@@ -1,0 +1,102 @@
+@import "tailwindcss";
+@import "./transitions.css";
+
+/* ── One Padel design tokens ───────────────────────────────────────
+   Padel-court material palette, not a generic sports-tech default:
+   court teal (the turf), ball yellow-green, clay/sand (out-of-bounds
+   infill), chalk white (sun-bleached line paint). Kept independent of
+   packages/ui's admin-dashboard theme — this is a different product
+   surface with its own identity. */
+:root {
+  color-scheme: light;
+
+  --chalk: oklch(0.98 0.006 95);
+  --chalk-dim: oklch(0.94 0.012 95);
+  --ink: oklch(0.19 0.03 165);
+  --ink-soft: oklch(0.19 0.03 165 / 70%);
+
+  --court: oklch(0.42 0.09 175);
+  --court-deep: oklch(0.27 0.07 175);
+  --court-bright: oklch(0.55 0.11 175);
+
+  --ball: oklch(0.86 0.19 121);
+  --ball-deep: oklch(0.68 0.17 121);
+
+  --clay: oklch(0.62 0.12 45);
+  --clay-soft: oklch(0.88 0.04 55);
+
+  --sky: oklch(0.9 0.04 195);
+
+  --font-display: var(--font-unbounded);
+  --font-body: var(--font-golos);
+  --font-mono: var(--font-plex-mono);
+
+  --container: 1180px;
+}
+
+@theme inline {
+  --color-chalk: var(--chalk);
+  --color-chalk-dim: var(--chalk-dim);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-court: var(--court);
+  --color-court-deep: var(--court-deep);
+  --color-court-bright: var(--court-bright);
+  --color-ball: var(--ball);
+  --color-ball-deep: var(--ball-deep);
+  --color-clay: var(--clay);
+  --color-clay-soft: var(--clay-soft);
+  --color-sky: var(--sky);
+
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-mono: var(--font-mono);
+}
+
+html {
+  background: var(--chalk);
+}
+
+body {
+  background: var(--chalk);
+  color: var(--ink);
+  font-family: var(--font-body);
+}
+
+@layer components {
+  /* Eyebrow labels used across every section — the recurring structural
+     device that stands in for the reference's numbered markers. A
+     sequence marker (01/02/03) would claim an order our sections don't
+     actually have; a court-referee-style label ("СЧЁТ", "СОСТАВ") is
+     true to what padel players actually see on a court/scoreboard.
+     Color is --ball-deep (not the lighter --ball, which is too close in
+     lightness to --chalk to read clearly as small text) — this is the
+     single most-repeated colored element on the site, so it's what
+     actually establishes lime as the primary accent rather than court
+     teal, which was winning by sheer repetition despite lime being the
+     intended primary. Color lives in @layer components (not a bare
+     rule) specifically so a Tailwind text-* utility on the same element
+     can override it — e.g. eyebrows on a dark section use --ball
+     instead via an inline style. Bare (unlayered) CSS otherwise beats
+     layered utilities regardless of source order. */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ball-deep);
+  }
+
+  .container-px {
+    width: 100%;
+    max-width: var(--container);
+    margin-inline: auto;
+    padding-inline: 1.5rem;
+  }
+
+  @media (min-width: 768px) {
+    .container-px {
+      padding-inline: 2.5rem;
+    }
+  }
+}

@@ -25,7 +25,6 @@ import { v } from "convex/values";
  *  - Templates / one-click weekly spawn
  *  - Guest-bringing (host + N guests), payment tracking, court/venue table
  *  - Verified player levels + join-time level enforcement
- *  - Attendance / no-show reliability
  *  - Member merging (guest → authed)
  */
 
@@ -120,6 +119,22 @@ export default defineSchema({
     removedBy: v.optional(
       v.union(v.literal("self"), v.object({ admin: v.id("players") })),
     ),
+
+    // Attendance tracking (v2 note in the header above is now superseded —
+    // this is the real thing). Everyone is assumed to have attended by
+    // default; undefined/false means "attended", true is an explicit admin
+    // flag for a no-show. Optional (not a required `attended` field) so no
+    // migration is needed — every existing row is silently "attended".
+    // Only meaningful for a roster membership on a match that already
+    // happened; the UI only exposes the toggle in that case.
+    noShow: v.optional(v.boolean()),
+
+    // Manual payment tracking (v1 — no gateway integration, no registered
+    // business entity to onboard one). Undefined/false = not paid. Lives on
+    // the membership (not the player) since payment resets every match.
+    // Admin-toggled from the dashboard; roster only (waitlist isn't playing
+    // yet, nothing to collect).
+    paid: v.optional(v.boolean()),
   })
     .index("by_match", ["matchId"])
     .index("by_match_and_role", ["matchId", "role"])
@@ -196,4 +211,16 @@ export default defineSchema({
     username: v.optional(v.string()),
     createdAt: v.number(),
   }).index("by_code", ["code"]),
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // COMMUNITY SETTINGS — a single row of admin-editable, community-wide
+  // config. Starts with payment info (card/bank details shown to players so
+  // they stop asking in chat); more settings can slot in here later. No
+  // index — one row, a full scan is trivial (same reasoning as `players`).
+  // ─────────────────────────────────────────────────────────────────────────
+  communitySettings: defineTable({
+    paymentInfo: v.optional(v.string()),
+    updatedAt: v.number(),
+    updatedBy: v.id("players"),
+  }),
 });

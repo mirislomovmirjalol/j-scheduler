@@ -1,3 +1,4 @@
+import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -470,6 +471,151 @@ export const listUpcomingForPlayer = query({
   },
 });
 
+// Same shape as listAllForPlayerPage, mirrored for the matches page's
+// "Прошедшие" quick view — matches that have already happened, most
+// recent first. Paginated for the same reason as "Все игры": past-match
+// history has no natural upper bound as a community's history grows, so a
+// bounded take() would eventually start silently dropping the oldest
+// matches. See listAllForPlayerPage's comment for the isPublished-after-
+// paginate tradeoff (short pages for non-admins is expected, not a bug).
+export const listPastForPlayerPage = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, { paginationOpts }) => {
+    const player = await requireAuthedPlayer(ctx).catch(() => null);
+    if (!player) {
+      return { page: [], isDone: true, continueCursor: "" };
+    }
+
+    const result = await ctx.db
+      .query("matches")
+      .withIndex("by_isDeleted_startsAt", (q) =>
+        q.eq("isDeleted", false).lt("startsAt", Date.now()),
+      )
+      .order("desc")
+      .paginate(paginationOpts);
+
+    const page = await Promise.all(
+      result.page
+        .filter((m) => m.isPublished || player.isAdmin)
+        .map(async (match) => {
+          const memberships = await ctx.db
+            .query("memberships")
+            .withIndex("by_match", (q) => q.eq("matchId", match._id))
+            .take(400);
+
+          const members = await Promise.all(
+            memberships
+              .filter((m) => !m.isDeleted)
+              .map(async (m) => ({
+                role: m.role,
+                player: await ctx.db.get("players", m.playerId),
+              })),
+          );
+
+          return {
+            match,
+            roster: members.filter((m) => m.role === "roster"),
+            waitlist: members.filter((m) => m.role === "waitlist"),
+          };
+        }),
+    );
+
+    return { ...result, page };
+  },
+});
+
+// The matches page's "Все игры" quick view — every match ever, paginated
+// (cursor-based, via Convex's usePaginatedQuery) rather than a bounded
+// take(), since this is the one view with no natural upper bound as a
+// community's history grows. isPublished is filtered after paginate (not
+// part of the index), so a returned page can be shorter than
+// paginationOpts.numItems for non-admins — a documented Convex tradeoff,
+// not a bug; the client just keeps requesting more until isDone.
+export const listAllForPlayerPage = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, { paginationOpts }) => {
+    const player = await requireAuthedPlayer(ctx).catch(() => null);
+    if (!player) {
+      return { page: [], isDone: true, continueCursor: "" };
+    }
+
+    const result = await ctx.db
+      .query("matches")
+      .withIndex("by_isDeleted_startsAt", (q) => q.eq("isDeleted", false))
+      .order("desc")
+      .paginate(paginationOpts);
+
+    const page = await Promise.all(
+      result.page
+        .filter((m) => m.isPublished || player.isAdmin)
+        .map(async (match) => {
+          const memberships = await ctx.db
+            .query("memberships")
+            .withIndex("by_match", (q) => q.eq("matchId", match._id))
+            .take(400);
+
+          const members = await Promise.all(
+            memberships
+              .filter((m) => !m.isDeleted)
+              .map(async (m) => ({
+                role: m.role,
+                player: await ctx.db.get("players", m.playerId),
+              })),
+          );
+
+          return {
+            match,
+            roster: members.filter((m) => m.role === "roster"),
+            waitlist: members.filter((m) => m.role === "waitlist"),
+          };
+        }),
+    );
+
+    return { ...result, page };
+  },
+});
+
+// Public, unauthenticated preview for the marketing site (apps/web) — the
+// same shape of data already visible to anyone in the Telegram group's
+// board, just without player names/usernames. Deliberately excludes roster/
+// waitlist membership details (PII) since this has no auth gate at all,
+// unlike listUpcomingForPlayer.
+export const listPublicUpcoming = query({
+  args: {},
+  handler: async (ctx) => {
+    const matches = (
+      await ctx.db
+        .query("matches")
+        .withIndex("by_isDeleted_startsAt", (q) =>
+          q.eq("isDeleted", false).gte("startsAt", Date.now()),
+        )
+        .order("asc")
+        .take(20)
+    ).filter((m) => m.isPublished);
+
+    return await Promise.all(
+      matches.map(async (match) => {
+        const roster = await ctx.db
+          .query("memberships")
+          .withIndex("by_match_and_role", (q) =>
+            q.eq("matchId", match._id).eq("role", "roster"),
+          )
+          .take(200);
+
+        return {
+          matchId: match._id,
+          startsAt: match.startsAt,
+          court: match.court,
+          format: match.format,
+          level: match.level,
+          maxMembers: match.maxMembers,
+          rosterCount: roster.filter((m) => !m.isDeleted).length,
+        };
+      }),
+    );
+  },
+});
+
 // The current player's own match history — past matches they had a live
 // (roster or waitlist) membership in, most recent first.
 export const listMyHistory = query({
@@ -602,5 +748,132 @@ export const listHistoryForPlayer = query({
     }
 
     return past.sort((a, b) => b.match.startsAt - a.match.startsAt);
+  },
+});
+
+// Admin-only complement to listHistoryForPlayer — matches this player was
+// on the ROSTER for but got flagged as a no-show (memberships.setNoShow),
+// surfaced on the admin player-profile page so an admin can see attendance
+// reliability at a glance. Not shown on the public profile.
+export const listNoShowsForPlayer = query({
+  args: { playerId: v.id("players") },
+  handler: async (ctx, { playerId }) => {
+    if (!(await requireAdminPlayer(ctx).catch(() => null))) return [];
+
+    const memberships = await ctx.db
+      .query("memberships")
+      .withIndex("by_player", (q) => q.eq("playerId", playerId))
+      .take(200);
+
+    const withMatch = await Promise.all(
+      memberships
+        .filter((m) => !m.isDeleted && m.role === "roster" && m.noShow)
+        .map(async (m) => {
+          const match = await ctx.db.get("matches", m.matchId);
+          return { membership: m, match };
+        }),
+    );
+
+    return withMatch
+      .filter(
+        (row): row is { membership: Doc<"memberships">; match: Doc<"matches"> } =>
+          !!row.match && !row.match.isDeleted,
+      )
+      .sort((a, b) => b.match.startsAt - a.match.startsAt);
+  },
+});
+
+// Attended-match calendar data — public, same "shareable profile" design as
+// players.getPublicProfile: reveals only dates and a same-day match count,
+// nothing about who else played or match details. Backs the GitHub-style
+// activity calendar (MatchCalendarHeatmap) on both the admin player-profile
+// page and the public profile page. "Attended" = roster (not waitlist),
+// the match already happened, and not flagged noShow (everyone defaults to
+// attended — see schema.ts).
+export const getAttendedMatchDays = query({
+  args: { playerId: v.id("players") },
+  handler: async (ctx, { playerId }) => {
+    const player = await ctx.db.get("players", playerId);
+    if (!player || player.isDeleted) return [];
+
+    const memberships = await ctx.db
+      .query("memberships")
+      .withIndex("by_player", (q) => q.eq("playerId", playerId))
+      .take(500);
+
+    const now = Date.now();
+    const withMatch = await Promise.all(
+      memberships
+        .filter((m) => !m.isDeleted && m.role === "roster" && !m.noShow)
+        .map(async (m) => await ctx.db.get("matches", m.matchId)),
+    );
+
+    return withMatch
+      .filter((match): match is Doc<"matches"> => !!match && !match.isDeleted && match.startsAt < now)
+      .map((match) => ({ startsAt: match.startsAt, rosterCount: 1 }));
+  },
+});
+
+// Bot command support — "/matches": every open (upcoming, published)
+// match, same data the board already shows. internalQuery (not exposed to
+// the browser) since the bot resolves "who's asking" from the Telegram
+// update, not a web session.
+export const listOpenForBotCommand = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const matches = (
+      await ctx.db
+        .query("matches")
+        .withIndex("by_isDeleted_startsAt", (q) =>
+          q.eq("isDeleted", false).gte("startsAt", Date.now()),
+        )
+        .order("asc")
+        .take(20)
+    ).filter((m) => m.isPublished);
+
+    return await Promise.all(
+      matches.map(async (match) => {
+        const roster = await ctx.db
+          .query("memberships")
+          .withIndex("by_match_and_role", (q) =>
+            q.eq("matchId", match._id).eq("role", "roster"),
+          )
+          .take(200);
+        return { match, rosterCount: roster.filter((m) => !m.isDeleted).length };
+      }),
+    );
+  },
+});
+
+// Bot command support — "/my": every match (past + upcoming, roster or
+// waitlist) the calling Telegram user has a live membership in, newest
+// first. Resolves the player from telegramUserId (bot context has no web
+// session to derive it from), unlike the dashboard's listMyHistory.
+export const listHistoryForTelegramUser = internalQuery({
+  args: { telegramUserId: v.number() },
+  handler: async (ctx, { telegramUserId }) => {
+    const player = await ctx.db
+      .query("players")
+      .withIndex("by_telegramUserId", (q) => q.eq("telegramUserId", telegramUserId))
+      .unique();
+    if (!player) return [];
+
+    const memberships = await ctx.db
+      .query("memberships")
+      .withIndex("by_player", (q) => q.eq("playerId", player._id))
+      .take(200);
+
+    const withMatch = await Promise.all(
+      memberships
+        .filter((m) => !m.isDeleted)
+        .map(async (m) => ({ membership: m, match: await ctx.db.get("matches", m.matchId) })),
+    );
+
+    return withMatch
+      .filter(
+        (row): row is { membership: Doc<"memberships">; match: Doc<"matches"> } =>
+          !!row.match && !row.match.isDeleted,
+      )
+      .sort((a, b) => b.match.startsAt - a.match.startsAt);
   },
 });

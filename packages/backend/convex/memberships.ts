@@ -37,6 +37,65 @@ async function dropMembership(
   }
 }
 
+// Shared by every "join" path (bot self-serve, web self-serve, admin
+// add-existing-player) — Golden Rule 1 again. The capacity check happens
+// INSIDE this function so it's race-safe regardless of caller: Convex
+// mutations are serializable, so two simultaneous joins for the last seat
+// resolve deterministically. Resurrects a previously soft-deleted
+// membership (rejoining after having left) rather than inserting a second
+// row for the same match+player pair.
+async function joinOrResurrectMembership(
+  ctx: MutationCtx,
+  matchId: Id<"matches">,
+  playerId: Id<"players">,
+  addedBy: "self" | { admin: Id<"players"> },
+): Promise<{ outcome: "roster" | "waitlist"; alreadyJoined: boolean }> {
+  const match = await ctx.db.get("matches", matchId);
+  if (!match || match.isDeleted) throw new Error("Match not found");
+
+  const existing = await ctx.db
+    .query("memberships")
+    .withIndex("by_match_and_player", (q) =>
+      q.eq("matchId", matchId).eq("playerId", playerId),
+    )
+    .unique();
+
+  if (existing && !existing.isDeleted) {
+    return { outcome: existing.role, alreadyJoined: true };
+  }
+
+  const rosterCount = (
+    await ctx.db
+      .query("memberships")
+      .withIndex("by_match_and_role", (q) =>
+        q.eq("matchId", matchId).eq("role", "roster"),
+      )
+      .take(200)
+  ).filter((m) => !m.isDeleted).length;
+
+  const role = rosterCount < match.maxMembers ? "roster" : "waitlist";
+
+  if (existing) {
+    await ctx.db.patch("memberships", existing._id, {
+      role,
+      isDeleted: false,
+      joinedAt: Date.now(),
+      addedBy,
+    });
+  } else {
+    await ctx.db.insert("memberships", {
+      matchId,
+      playerId,
+      role,
+      joinedAt: Date.now(),
+      addedBy,
+      isDeleted: false,
+    });
+  }
+
+  return { outcome: role, alreadyJoined: false };
+}
+
 // Board toggle support: resolves whether the tapper currently has a live
 // membership for this match. Telegram's board is one shared message, so the
 // button's label can't differ per viewer — only the tap's effect can. The
@@ -85,52 +144,29 @@ export const joinMatch = internalMutation({
     }
 
     const player = await findOrCreatePlayerFromTelegram(ctx, args);
+    const result = await joinOrResurrectMembership(ctx, args.matchId, player._id, "self");
+    return result;
+  },
+});
 
-    // Guard double-join: a live membership for this match+player already
-    // exists, so re-tapping Join is a no-op that just reports current state.
-    const existing = await ctx.db
-      .query("memberships")
-      .withIndex("by_match_and_player", (q) =>
-        q.eq("matchId", args.matchId).eq("playerId", player._id),
-      )
-      .unique();
+// Self-serve join from the web dashboard — same effect as the bot's Join
+// button (CLAUDE.md Golden Rule 1: same underlying assignment logic via
+// joinOrResurrectMembership), just resolved via the authed session instead
+// of a telegramUserId. A draft match stays unjoinable here too, same as the
+// bot.
+export const joinMatchSelf = mutation({
+  args: { matchId: v.id("matches") },
+  handler: async (ctx, { matchId }) => {
+    const player = await requireAuthedPlayer(ctx);
 
-    if (existing && !existing.isDeleted) {
-      return { outcome: existing.role, alreadyJoined: true };
+    const match = await ctx.db.get("matches", matchId);
+    if (!match || match.isDeleted || !match.isPublished) {
+      return { outcome: "match_gone" as const, alreadyJoined: false };
     }
 
-    const rosterCount = (
-      await ctx.db
-        .query("memberships")
-        .withIndex("by_match_and_role", (q) =>
-          q.eq("matchId", args.matchId).eq("role", "roster"),
-        )
-        .take(200)
-    ).filter((m) => !m.isDeleted).length;
-
-    const role = rosterCount < match.maxMembers ? "roster" : "waitlist";
-
-    if (existing) {
-      // Resurrect a previously soft-deleted membership (e.g. they left and
-      // are rejoining) rather than inserting a second row for the pair.
-      await ctx.db.patch("memberships", existing._id, {
-        role,
-        isDeleted: false,
-        joinedAt: Date.now(),
-        addedBy: "self",
-      });
-    } else {
-      await ctx.db.insert("memberships", {
-        matchId: args.matchId,
-        playerId: player._id,
-        role,
-        joinedAt: Date.now(),
-        addedBy: "self",
-        isDeleted: false,
-      });
-    }
-
-    return { outcome: role, alreadyJoined: false };
+    const result = await joinOrResurrectMembership(ctx, matchId, player._id, "self");
+    await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
+    return result;
   },
 });
 
@@ -204,6 +240,49 @@ export const removeMember = mutation({
       kind: "removed",
     });
     await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
+  },
+});
+
+// Admin flags (or unflags) a roster member as a no-show, after the fact.
+// Only meaningful once the match has happened — everyone defaults to
+// "attended" (see schema.ts), so this is purely a correction, not a
+// check-in. No board sync / DM: this is a quiet record-keeping action, not
+// a state change anyone else needs to be notified about.
+export const setNoShow = mutation({
+  args: { membershipId: v.id("memberships"), noShow: v.boolean() },
+  handler: async (ctx, { membershipId, noShow }) => {
+    await requireAdminPlayer(ctx);
+
+    const membership = await ctx.db.get("memberships", membershipId);
+    if (!membership || membership.isDeleted) throw new Error("Not a member");
+    if (membership.role !== "roster") {
+      throw new Error("Only roster members can be flagged");
+    }
+
+    const match = await ctx.db.get("matches", membership.matchId);
+    if (!match || match.startsAt >= Date.now()) {
+      throw new Error("Match hasn't happened yet");
+    }
+
+    await ctx.db.patch("memberships", membershipId, { noShow });
+  },
+});
+
+// Manual payment tracking (v1 — no gateway integration). Unlike setNoShow,
+// not gated on the match having already happened: an admin should be able to
+// mark payment collected any time before or after the game.
+export const setPaid = mutation({
+  args: { membershipId: v.id("memberships"), paid: v.boolean() },
+  handler: async (ctx, { membershipId, paid }) => {
+    await requireAdminPlayer(ctx);
+
+    const membership = await ctx.db.get("memberships", membershipId);
+    if (!membership || membership.isDeleted) throw new Error("Not a member");
+    if (membership.role !== "roster") {
+      throw new Error("Only roster members can be flagged");
+    }
+
+    await ctx.db.patch("memberships", membershipId, { paid });
   },
 });
 
@@ -309,52 +388,14 @@ export const addExistingPlayerToMatch = mutation({
   handler: async (ctx, { matchId, playerId }) => {
     const admin = await requireAdminPlayer(ctx);
 
-    const match = await ctx.db.get("matches", matchId);
-    if (!match || match.isDeleted) throw new Error("Match not found");
-
     const player = await ctx.db.get("players", playerId);
     if (!player || player.isDeleted) throw new Error("Player not found");
 
-    const existing = await ctx.db
-      .query("memberships")
-      .withIndex("by_match_and_player", (q) =>
-        q.eq("matchId", matchId).eq("playerId", playerId),
-      )
-      .unique();
-
-    if (existing && !existing.isDeleted) {
-      return { outcome: existing.role, alreadyJoined: true };
-    }
-
-    const rosterCount = (
-      await ctx.db
-        .query("memberships")
-        .withIndex("by_match_and_role", (q) => q.eq("matchId", matchId).eq("role", "roster"))
-        .take(200)
-    ).filter((m) => !m.isDeleted).length;
-
-    const role = rosterCount < match.maxMembers ? "roster" : "waitlist";
-
-    if (existing) {
-      await ctx.db.patch("memberships", existing._id, {
-        role,
-        isDeleted: false,
-        joinedAt: Date.now(),
-        addedBy: { admin: admin._id },
-      });
-    } else {
-      await ctx.db.insert("memberships", {
-        matchId,
-        playerId,
-        role,
-        joinedAt: Date.now(),
-        addedBy: { admin: admin._id },
-        isDeleted: false,
-      });
-    }
-
+    const result = await joinOrResurrectMembership(ctx, matchId, playerId, {
+      admin: admin._id,
+    });
     await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
-    return { outcome: role, alreadyJoined: false };
+    return result;
   },
 });
 

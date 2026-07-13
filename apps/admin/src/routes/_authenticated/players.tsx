@@ -26,74 +26,30 @@ import {
 } from "@J-schedule/ui/components/table"
 import { createFileRoute, Link, Navigate } from "@tanstack/react-router"
 import { useMutation, useQuery } from "convex/react"
-import { useEffect, useRef, useState } from "react"
+import { useState } from "react"
 import { toast } from "sonner"
 
+import PlayersActiveFilters from "@/components/players-active-filters"
+import PlayersFilterPanel from "@/components/players-filter-panel"
+import PlayersSearchInput from "@/components/players-search-input"
 import Reveal from "@/components/reveal"
 import StatCard from "@/components/stat-card"
+import StatCardGrid from "@/components/stat-card-grid"
 import SuccessCheck from "@/components/success-check"
-import { applyPlayersFilters, parsePlayersSearch, type PlayersType } from "@/lib/players-filters"
+import { applyPlayersFilters, parsePlayersSearch } from "@/lib/players-filters"
 import { useAdminGuard } from "@/lib/use-admin-guard"
-import { useDebouncedValue } from "@/lib/use-debounced-value"
-
-const controlClassName =
-  "h-9 rounded-md border border-input bg-transparent px-2 text-sm text-foreground outline-none focus-visible:border-ring"
 
 export const Route = createFileRoute("/_authenticated/players")({
   validateSearch: parsePlayersSearch,
   component: PlayersPage,
 })
 
-// Owns the debounce timer and every keystroke's state itself, so typing
-// only re-renders this small input — not the whole players table (which
-// was the actual cause of the "laggy" feel: every keystroke was
-// re-rendering every row, each with its own mutations/dialogs/checkbox).
-// Keyed by the parent's `resetKey`, which only changes on an explicit
-// "Сбросить" click — never on our own debounced updates — so typing never
-// remounts (and never loses focus).
-function PlayersSearchInput({
-  initialValue,
-  onDebouncedChange,
-}: {
-  initialValue: string
-  onDebouncedChange: (value: string) => void
-}) {
-  const [value, setValue] = useState(initialValue)
-  const debounced = useDebouncedValue(value, 300)
-  const onDebouncedChangeRef = useRef(onDebouncedChange)
-  // Refs must not be written during render (breaks under concurrent
-  // rendering) — keep it fresh via an every-render effect instead, same
-  // as the useLatest/useEffectEvent pattern.
-  useEffect(() => {
-    onDebouncedChangeRef.current = onDebouncedChange
-  })
-  const mounted = useRef(false)
-
-  useEffect(() => {
-    if (!mounted.current) {
-      mounted.current = true
-      return
-    }
-    onDebouncedChangeRef.current(debounced)
-  }, [debounced])
-
-  return (
-    <input
-      type="text"
-      placeholder="Имя или @username"
-      className={`${controlClassName} w-48`}
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-    />
-  )
-}
-
 function PlayersPage() {
   const { player, isChecking } = useAdminGuard()
   const players = useQuery(api.players.listAll)
   const search = Route.useSearch()
   const navigate = Route.useNavigate()
-  const [resetKey, setResetKey] = useState(0)
+  const [searchResetKey, setSearchResetKey] = useState(0)
 
   if (isChecking) {
     return (
@@ -120,7 +76,7 @@ function PlayersPage() {
       <h1 className="text-2xl font-semibold tracking-tight">Игроки</h1>
 
       {players && players.length > 0 && (
-        <div className="grid grid-cols-3 gap-3">
+        <StatCardGrid>
           <StatCard label="Всего игроков" value={players.length} to="/players" />
           <StatCard
             label="Админов"
@@ -134,60 +90,29 @@ function PlayersPage() {
             to="/players"
             search={{ type: "guest" }}
           />
-        </div>
+        </StatCardGrid>
       )}
 
       {players && players.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           <PlayersSearchInput
-            key={resetKey}
+            resetKey={searchResetKey}
             initialValue={search.q ?? ""}
-            onDebouncedChange={(q) => navigate({ search: (prev) => ({ ...prev, q: q || undefined }) })}
+            onDebouncedChange={(q) =>
+              navigate({ search: (prev) => ({ ...prev, q: q || undefined }) })
+            }
           />
-          <select
-            className={controlClassName}
-            value={search.type ?? ""}
-            onChange={(e) =>
-              navigate({
-                search: (prev) => ({
-                  ...prev,
-                  type: (e.target.value || undefined) as PlayersType | undefined,
-                }),
-              })
-            }
-          >
-            <option value="">Все</option>
-            <option value="authed">Игроки</option>
-            <option value="guest">Гости</option>
-          </select>
-          <select
-            className={controlClassName}
-            value={search.role ?? ""}
-            onChange={(e) =>
-              navigate({
-                search: (prev) => ({
-                  ...prev,
-                  role: (e.target.value || undefined) as "admin" | "member" | undefined,
-                }),
-              })
-            }
-          >
-            <option value="">Все роли</option>
-            <option value="admin">Админы</option>
-            <option value="member">Не админы</option>
-          </select>
-          {(search.q || search.type || search.role) && (
-            <button
-              type="button"
-              className="h-9 rounded-md px-2 text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground"
-              onClick={() => {
-                navigate({ search: { q: undefined, type: undefined, role: undefined } })
-                setResetKey((k) => k + 1)
-              }}
-            >
-              Сбросить
-            </button>
-          )}
+          <PlayersFilterPanel
+            search={search}
+            onChange={(patch) => navigate({ search: (prev) => ({ ...prev, ...patch }) })}
+          />
+          <PlayersActiveFilters
+            search={search}
+            onRemove={(key) => {
+              navigate({ search: (prev) => ({ ...prev, [key]: undefined }) })
+              if (key === "q") setSearchResetKey((k) => k + 1)
+            }}
+          />
         </div>
       )}
 

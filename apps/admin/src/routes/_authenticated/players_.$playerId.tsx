@@ -1,13 +1,17 @@
 import { api } from "@J-schedule/backend/convex/_generated/api"
 import type { Id } from "@J-schedule/backend/convex/_generated/dataModel"
 import { Badge } from "@J-schedule/ui/components/badge"
-import { Card, CardContent } from "@J-schedule/ui/components/card"
+import { Button } from "@J-schedule/ui/components/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@J-schedule/ui/components/card"
 import { Skeleton } from "@J-schedule/ui/components/skeleton"
 import { createFileRoute, Navigate } from "@tanstack/react-router"
 import { useQuery } from "convex/react"
+import { toast } from "sonner"
 
 import BackButton from "@/components/back-button"
 import MatchHistoryList from "@/components/match-history-list"
+import NoShowList from "@/components/no-show-list"
+import PlayerActivityCalendar from "@/components/player-activity-calendar"
 import Reveal from "@/components/reveal"
 import { useAdminGuard } from "@/lib/use-admin-guard"
 
@@ -21,6 +25,7 @@ function PlayerProfilePage() {
   const id = playerId as Id<"players">
   const player = useQuery(api.players.getById, { playerId: id })
   const history = useQuery(api.matches.listHistoryForPlayer, { playerId: id })
+  const noShows = useQuery(api.matches.listNoShowsForPlayer, { playerId: id })
 
   if (isChecking || player === undefined) {
     return (
@@ -38,17 +43,41 @@ function PlayerProfilePage() {
   return (
     <Reveal className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
       <BackButton />
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {player.firstName} {player.lastName ?? ""}
-        </h1>
-        <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          {player.username && <span>@{player.username}</span>}
-          {player.type === "guest" && <Badge variant="secondary">гость</Badge>}
-          {player.isAdmin && <Badge variant="outline">админ</Badge>}
-          {player.level && <span>Уровень {player.level}</span>}
+      <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {player.firstName} {player.lastName ?? ""}
+          </h1>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            {player.username && <span>@{player.username}</span>}
+            {player.type === "guest" && <Badge variant="secondary">гость</Badge>}
+            {player.isAdmin && <Badge variant="outline">админ</Badge>}
+            {player.level && <span>Уровень {player.level}</span>}
+          </div>
         </div>
+        {player.type === "authed" && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              const url = `${window.location.origin}/p/${player._id}`
+              await navigator.clipboard.writeText(url)
+              toast.success("Публичная ссылка скопирована")
+            }}
+          >
+            Скопировать публичную ссылку
+          </Button>
+        )}
       </div>
+
+      <Card className="overflow-visible">
+        <CardHeader>
+          <CardTitle className="text-base font-medium">Активность</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <PlayerActivityCalendar playerId={player._id} />
+        </CardContent>
+      </Card>
 
       <div>
         <h2 className="mb-2 text-lg font-medium">История игр</h2>
@@ -73,6 +102,17 @@ function PlayerProfilePage() {
               emptyTitle="Пока нет прошедших игр"
               emptyDescription="Сыгранные игры появятся здесь."
             />
+          </Reveal>
+        )}
+      </div>
+
+      <div>
+        <h2 className="mb-2 text-lg font-medium">Пропущенные игры</h2>
+        {noShows === undefined ? (
+          <Skeleton className="h-16 w-full" />
+        ) : (
+          <Reveal>
+            <NoShowList entries={noShows} />
           </Reveal>
         )}
       </div>

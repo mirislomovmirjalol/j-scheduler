@@ -48,7 +48,17 @@ export type CalendarMatch = { startsAt: number; rosterCount: number }
 
 type HoverState = { x: number; y: number; text: string }
 
-export default function MatchCalendarHeatmap({ matches }: { matches: CalendarMatch[] }) {
+export default function MatchCalendarHeatmap({
+  matches,
+  formatTooltip,
+}: {
+  matches: CalendarMatch[]
+  // Default text ("N игры · N чел.") assumes a community-wide calendar
+  // (headcount per day). A per-player calendar — same grid, same intensity
+  // algorithm, different meaning for "attendees" (it's always this one
+  // player) — passes its own copy instead of that framing.
+  formatTooltip?: (params: { date: Date; matchCount: number; attendees: number }) => string
+}) {
   // Impure — captured once via a lazy useState initializer (not called
   // directly during render, which react-hooks/purity disallows anywhere in
   // the render path, not just inside useMemo) and passed in as an explicit
@@ -145,15 +155,17 @@ export default function MatchCalendarHeatmap({ matches }: { matches: CalendarMat
                       <div key={dayIndex} style={{ width: CELL_PX, height: CELL_PX }} />
                     )
                   }
-                  const text = `${date.toLocaleDateString("ru-RU", {
-                    day: "2-digit",
-                    month: "long",
-                    timeZone: "UTC",
-                  })}${
-                    matchCount > 0
-                      ? ` · ${matchCount} ${matchCount === 1 ? "игра" : "игры"} · ${attendees} чел.`
-                      : " · нет игр"
-                  }`
+                  const text = formatTooltip
+                    ? formatTooltip({ date, matchCount, attendees })
+                    : `${date.toLocaleDateString("ru-RU", {
+                        day: "2-digit",
+                        month: "long",
+                        timeZone: "UTC",
+                      })}${
+                        matchCount > 0
+                          ? ` · ${matchCount} ${matchCount === 1 ? "игра" : "игры"} · ${attendees} чел.`
+                          : " · нет игр"
+                      }`
                   return (
                     <button
                       key={dayIndex}

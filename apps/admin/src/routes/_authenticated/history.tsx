@@ -8,6 +8,7 @@ import { useState } from "react"
 import MatchHistoryList from "@/components/match-history-list"
 import Reveal from "@/components/reveal"
 import StatCard from "@/components/stat-card"
+import StatCardGrid from "@/components/stat-card-grid"
 
 export const Route = createFileRoute("/_authenticated/history")({
   component: HistoryPage,
@@ -26,7 +27,7 @@ function HistoryPage() {
       <h1 className="text-2xl font-semibold tracking-tight">Моя история</h1>
 
       {history && history.length > 0 && (
-        <div className="grid grid-cols-3 gap-3">
+        <StatCardGrid>
           <StatCard
             label="Сыграно игр"
             value={history.length}
@@ -45,7 +46,7 @@ function HistoryPage() {
             onClick={() => setRoleFilter(roleFilter === "waitlist" ? null : "waitlist")}
             active={roleFilter === "waitlist"}
           />
-        </div>
+        </StatCardGrid>
       )}
 
       {history === undefined ? (

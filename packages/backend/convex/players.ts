@@ -96,6 +96,18 @@ export const setWantsDms = internalMutation({
   },
 });
 
+// Self-serve counterpart to setWantsDms above — lets a player opt in/out of
+// DM reminders from the web profile page, not just via the bot's /start.
+// Patches the caller's OWN row (derived from auth), never a client-supplied
+// playerId.
+export const setWantsDmsSelf = mutation({
+  args: { wantsDms: v.boolean() },
+  handler: async (ctx, { wantsDms }) => {
+    const player = await requireAuthedPlayer(ctx);
+    await ctx.db.patch("players", player._id, { wantsDms });
+  },
+});
+
 // Called from signInAsTelegramUser (auth/signInHelpers.ts), shared by every
 // Telegram sign-in method's endpoint (deep-link, Mini App), right after
 // better-auth resolves/creates a user for a verified Telegram identity.
@@ -206,6 +218,19 @@ export const getById = query({
     const player = await ctx.db.get("players", playerId);
     if (!player || player.isDeleted) return null;
     return player;
+  },
+});
+
+// Public, unauthenticated profile — deliberately name + level only, no
+// Telegram username or other contact info (explicit privacy decision, same
+// reasoning as matches.listPublicUpcoming's "no auth gate at all" caveat).
+// Backs the shareable public profile page.
+export const getPublicProfile = query({
+  args: { playerId: v.id("players") },
+  handler: async (ctx, { playerId }) => {
+    const player = await ctx.db.get("players", playerId);
+    if (!player || player.isDeleted) return null;
+    return { firstName: player.firstName, lastName: player.lastName, level: player.level };
   },
 });
 

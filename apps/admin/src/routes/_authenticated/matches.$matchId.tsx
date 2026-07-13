@@ -53,6 +53,8 @@ export const Route = createFileRoute("/_authenticated/matches/$matchId")({
 
 function MatchDetailPage() {
   const player = useQuery(api.players.getCurrentPlayer)
+  const settings = useQuery(api.communitySettings.get)
+  const paymentInfo = settings?.paymentInfo
   const { matchId } = Route.useParams()
   const detail = useQuery(api.matches.getMatchDetail, {
     matchId: matchId as Id<"matches">,
@@ -60,6 +62,7 @@ function MatchDetailPage() {
   const cancelMatch = useMutation(api.matches.cancelMatch)
   const publishMatch = useMutation(api.matches.publishMatch)
   const leaveMatch = useMutation(api.memberships.leaveMatch)
+  const joinMatchSelf = useMutation(api.memberships.joinMatchSelf)
   const navigate = useNavigate()
 
   if (detail === undefined) {
@@ -81,6 +84,10 @@ function MatchDetailPage() {
   }
 
   const { match, roster, waitlist, cancelled, myMembership } = detail
+  // Attendance only makes sense in hindsight — everyone defaults to
+  // "attended" (schema.ts), so the flag-a-no-show toggle only appears once
+  // there's something to correct.
+  const isPastMatch = match.startsAt < Date.now()
 
   return (
     <Reveal className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
@@ -97,6 +104,9 @@ function MatchDetailPage() {
             {match.court} · {match.format} · Уровень {match.level}
             {match.pricePerPerson ? ` · ${match.pricePerPerson} с человека` : ""}
           </p>
+          {match.pricePerPerson && paymentInfo && (
+            <p className="mt-1 text-sm text-muted-foreground">💳 {paymentInfo}</p>
+          )}
           {match.description && (
             <p className="mt-1 text-sm text-muted-foreground">{match.description}</p>
           )}
@@ -177,7 +187,14 @@ function MatchDetailPage() {
         waitlistCount={waitlist.length}
       />
 
-      {myMembership && (
+      {player?.isAdmin && match.pricePerPerson && roster.length > 0 && (
+        <p className="text-sm text-muted-foreground">
+          Оплатили: <DigitGroup value={roster.filter((m) => m.membership.paid).length} />/
+          <DigitGroup value={roster.length} />
+        </p>
+      )}
+
+      {myMembership ? (
         <div className="flex flex-col items-start justify-between gap-3 rounded-md border border-input p-4 sm:flex-row sm:items-center">
           <p className="text-sm">
             Ты {myMembership.role === "roster" ? "в ростере" : "в листе ожидания"} этой игры.
@@ -213,6 +230,34 @@ function MatchDetailPage() {
             </AlertDialogContent>
           </AlertDialog>
         </div>
+      ) : (
+        match.isPublished &&
+        !isPastMatch && (
+          <div className="flex flex-col items-start justify-between gap-3 rounded-md border border-input p-4 sm:flex-row sm:items-center">
+            <p className="text-sm">Записаться на эту игру?</p>
+            <Button
+              size="sm"
+              onClick={async () => {
+                try {
+                  const result = await joinMatchSelf({ matchId: match._id })
+                  if (result.outcome === "match_gone") {
+                    toast.error("Игра больше недоступна")
+                  } else {
+                    toast.success(
+                      result.outcome === "roster"
+                        ? "Ты в игре!"
+                        : "Мест нет, ты в листе ожидания",
+                    )
+                  }
+                } catch {
+                  toast.error("Не получилось записаться")
+                }
+              }}
+            >
+              Записаться
+            </Button>
+          </div>
+        )
       )}
 
       <MemberSection
@@ -221,6 +266,10 @@ function MatchDetailPage() {
         emptyText="Пока никто не записался."
         showPromote={false}
         showActions={!!player?.isAdmin}
+        showAttendance={!!player?.isAdmin && isPastMatch}
+        showPaid={!!match.pricePerPerson}
+        isAdmin={!!player?.isAdmin}
+        currentPlayerId={player?._id}
       />
 
       <MemberSection
@@ -257,15 +306,25 @@ function MemberSection({
   emptyText,
   showPromote,
   showActions,
+  showAttendance = false,
+  showPaid = false,
+  isAdmin = false,
+  currentPlayerId,
 }: {
   title: string
   members: { membership: Doc<"memberships">; player: Doc<"players"> | null }[]
   emptyText: string
   showPromote: boolean
   showActions: boolean
+  showAttendance?: boolean
+  showPaid?: boolean
+  isAdmin?: boolean
+  currentPlayerId?: Id<"players">
 }) {
   const removeMember = useMutation(api.memberships.removeMember)
   const promoteFromWaitlist = useMutation(api.memberships.promoteFromWaitlist)
+  const setNoShow = useMutation(api.memberships.setNoShow)
+  const setPaid = useMutation(api.memberships.setPaid)
 
   return (
     <div>
@@ -283,6 +342,8 @@ function MemberSection({
             <TableRow>
               <TableHead>Игрок</TableHead>
               <TableHead>Записан</TableHead>
+              {showAttendance && <TableHead>Пришёл</TableHead>}
+              {showPaid && <TableHead>Оплата</TableHead>}
               {showActions && <TableHead className="text-right">Действия</TableHead>}
             </TableRow>
           </TableHeader>
@@ -303,6 +364,57 @@ function MemberSection({
                 <TableCell className="text-muted-foreground">
                   {formatTashkentDateTime(membership.joinedAt)}
                 </TableCell>
+                {showAttendance && (
+                  <TableCell>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={!membership.noShow}
+                        onChange={async (e) => {
+                          try {
+                            await setNoShow({
+                              membershipId: membership._id,
+                              noShow: !e.target.checked,
+                            })
+                          } catch {
+                            toast.error("Не получилось отметить посещение")
+                          }
+                        }}
+                      />
+                      {membership.noShow ? (
+                        <span className="text-muted-foreground">не пришёл</span>
+                      ) : (
+                        <span>пришёл</span>
+                      )}
+                    </label>
+                  </TableCell>
+                )}
+                {showPaid && (
+                  <TableCell>
+                    {isAdmin ? (
+                      <Button
+                        size="sm"
+                        variant={membership.paid ? "default" : "outline"}
+                        onClick={async () => {
+                          try {
+                            await setPaid({
+                              membershipId: membership._id,
+                              paid: !membership.paid,
+                            })
+                          } catch {
+                            toast.error("Не получилось отметить оплату")
+                          }
+                        }}
+                      >
+                        {membership.paid ? "✅ Оплачено" : "Отметить оплату"}
+                      </Button>
+                    ) : membership.playerId === currentPlayerId ? (
+                      <Badge variant={membership.paid ? "default" : "secondary"}>
+                        {membership.paid ? "Оплачено" : "Не оплачено"}
+                      </Badge>
+                    ) : null}
+                  </TableCell>
+                )}
                 {showActions && (
                   <TableCell className="flex justify-end gap-2 text-right">
                     {showPromote && (

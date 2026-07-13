@@ -22,11 +22,11 @@ export const syncBoard = internalAction({
     }
     const chatId = Number(chatIdEnv);
 
-    const matches = await ctx.runQuery(
-      internal.matches.listOpenWithRosterCounts,
-      {},
-    );
-    const { text, buttons } = renderBoard(matches);
+    const [matches, settings] = await Promise.all([
+      ctx.runQuery(internal.matches.listOpenWithRosterCounts, {}),
+      ctx.runQuery(internal.communitySettings.getInternal, {}),
+    ]);
+    const { text, buttons } = renderBoard(matches, settings?.paymentInfo);
 
     const board = await ctx.runQuery(internal.boardState.get, { chatId });
 

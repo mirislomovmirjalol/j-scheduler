@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import { internalAction } from "../_generated/server";
+import { formatTashkentDateTime } from "../lib/time";
 import { strings } from "../lib/strings";
 import { callTelegramApi } from "./api";
 
@@ -53,7 +54,81 @@ export const handleMessage = internalAction({
       return;
     }
 
-    // Extension point for Milestone 4+ (admin commands).
+    // "/matches" — every open (upcoming, published) match, open to anyone,
+    // in whatever chat it's asked in. Mirrors the board's own data.
+    if (text?.startsWith("/matches") && chat?.id) {
+      const matches = await ctx.runQuery(internal.matches.listOpenForBotCommand, {});
+      if (matches.length === 0) {
+        await callTelegramApi("sendMessage", { chat_id: chat.id, text: strings.noOpenMatches });
+        return;
+      }
+      const lines = [
+        strings.openMatchesHeader,
+        "",
+        ...matches.map(({ match, rosterCount }) =>
+          strings.matchLine({
+            dateTime: formatTashkentDateTime(match.startsAt),
+            court: match.court,
+            format: match.format,
+            level: match.level,
+            rosterCount,
+            maxMembers: match.maxMembers,
+          }),
+        ),
+      ];
+      await callTelegramApi("sendMessage", { chat_id: chat.id, text: lines.join("\n") });
+      return;
+    }
+
+    // "/my" — every match (past + upcoming, roster or waitlist) the caller
+    // has a live membership in. Personal, so no scale/broadcast concern —
+    // just a length cap on the reply itself.
+    if (text?.startsWith("/my") && chat?.id && from?.id) {
+      const history = await ctx.runQuery(internal.matches.listHistoryForTelegramUser, {
+        telegramUserId: from.id,
+      });
+      if (history.length === 0) {
+        await callTelegramApi("sendMessage", { chat_id: chat.id, text: strings.noPersonalMatches });
+        return;
+      }
+      const now = Date.now();
+      const SHOWN_LIMIT = 20;
+      const shown = history.slice(0, SHOWN_LIMIT);
+      const lines = [
+        strings.myMatchesHeader,
+        "",
+        ...shown.map(({ match, membership }) =>
+          strings.myMatchLine({
+            dateTime: formatTashkentDateTime(match.startsAt),
+            court: match.court,
+            isPast: match.startsAt < now,
+            role: membership.role,
+          }),
+        ),
+      ];
+      let text2 = lines.join("\n");
+      if (history.length > SHOWN_LIMIT) {
+        text2 += strings.myMatchesTruncated(SHOWN_LIMIT, history.length);
+      }
+      await callTelegramApi("sendMessage", { chat_id: chat.id, text: text2 });
+      return;
+    }
+
+    // "/pay" — the community's payment details, works in the group AND in
+    // DMs (unlike /start, which only makes sense as a DM). This is the
+    // actual "stop asking in chat for the card number" fix.
+    if (text?.startsWith("/pay") && chat?.id) {
+      const settings = await ctx.runQuery(internal.communitySettings.getInternal, {});
+      await callTelegramApi("sendMessage", {
+        chat_id: chat.id,
+        text: settings?.paymentInfo
+          ? strings.paymentInfo(settings.paymentInfo)
+          : strings.noPaymentInfo,
+      });
+      return;
+    }
+
+    // Extension point for future commands.
     console.log("telegram message received, no handler yet", {
       chatId: chat?.id,
       text,

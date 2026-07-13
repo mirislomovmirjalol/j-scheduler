@@ -5,6 +5,15 @@ import { tashkentLocalToEpochMs } from "@/lib/tashkent-time"
 export type MatchesSort = "soonest" | "latest" | "created_desc"
 export type MatchesStatus = "draft" | "published"
 
+// The matches page's primary quick-access view — three mutually-exclusive
+// time scopes, each backed by its own query (not a client-side filter over
+// one combined list): "active" -> listUpcomingForPlayer, "past" ->
+// listPastForPlayer, "all" -> the paginated listAllForPlayerPage. This is
+// deliberately independent of `sort` — an earlier version coupled "show
+// everything" to "sort by creation date," which made the two controls look
+// like they were fighting each other instead of two separate axes.
+export type MatchesView = "all" | "active" | "past"
+
 export type MatchesSearch = {
   court?: string
   format?: string
@@ -15,6 +24,7 @@ export type MatchesSearch = {
   to?: string
   sort?: MatchesSort
   mine?: boolean
+  view?: MatchesView
 }
 
 // TanStack Router calls this with the raw parsed query string — every field
@@ -24,6 +34,7 @@ export function parseMatchesSearch(search: Record<string, unknown>): MatchesSear
   const str = (v: unknown) => (typeof v === "string" && v.length > 0 ? v : undefined)
   const status = str(search.status)
   const sort = str(search.sort)
+  const view = str(search.view)
   return {
     court: str(search.court),
     format: str(search.format),
@@ -34,13 +45,15 @@ export function parseMatchesSearch(search: Record<string, unknown>): MatchesSear
     to: str(search.to),
     sort: sort === "latest" || sort === "created_desc" ? sort : undefined,
     mine: search.mine === true || search.mine === "true" ? true : undefined,
+    view: view === "all" || view === "past" ? view : undefined,
   }
 }
 
 // The filter fields a user actually sets from the panel — deliberately
-// excludes `sort` and `mine`, which aren't "filters" in the reset-button
-// sense (sort always has a value, and `mine` is set by the dashboard's
-// "Мои игры" link, not a panel control).
+// excludes `sort`, `mine`, and `view`, which aren't "filters" in the
+// reset-button sense (sort always has a value, `mine` is set by the
+// dashboard's "Мои игры" link, and `view` is the page's primary tab
+// selector, not something a "Сбросить" click should silently change).
 const FILTER_KEYS = [
   "court",
   "format",
@@ -68,6 +81,9 @@ export type MatchListEntry = {
   waitlist: { player: Doc<"players"> | null }[]
 }
 
+// Time-scope (active/past/all) is handled by which query the caller runs,
+// not by this function — everything here is the remaining, orthogonal set
+// of filters + sort applied on top of whichever list that query returned.
 export function applyMatchesFilters<T extends MatchListEntry>(
   entries: T[],
   search: MatchesSearch,

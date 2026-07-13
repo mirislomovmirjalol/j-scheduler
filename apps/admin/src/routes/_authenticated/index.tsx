@@ -7,6 +7,7 @@ import DigitGroup from "@/components/digit-group"
 import MatchCalendarHeatmap from "@/components/match-calendar-heatmap"
 import { FillRateTrendChart, MatchesPerMonthChart } from "@/components/match-trend-charts"
 import StatCard from "@/components/stat-card"
+import StatCardGrid from "@/components/stat-card-grid"
 import { formatTashkentDateTime } from "@/lib/format"
 import type { MatchListEntry } from "@/lib/matches-filters"
 
@@ -40,7 +41,7 @@ function HomePage() {
         Привет{player ? `, ${player.firstName}` : ""}!
       </h1>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <StatCardGrid>
         <StatCard label="Предстоящих игр" value={matches?.length ?? "—"} to="/matches" />
         <StatCard
           label="Свободных мест"
@@ -66,7 +67,7 @@ function HomePage() {
             />
           </>
         )}
-      </div>
+      </StatCardGrid>
 
       {matches && matches.length > 0 && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

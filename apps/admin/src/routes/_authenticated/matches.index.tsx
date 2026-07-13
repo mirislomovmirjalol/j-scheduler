@@ -4,8 +4,9 @@ import { Button } from "@J-schedule/ui/components/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@J-schedule/ui/components/card"
 import { Empty, EmptyDescription, EmptyTitle } from "@J-schedule/ui/components/empty"
 import { Skeleton } from "@J-schedule/ui/components/skeleton"
+import { Tabs, TabsIndicator, TabsList, TabsTab } from "@J-schedule/ui/components/tabs"
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { useMutation, useQuery } from "convex/react"
+import { useMutation, usePaginatedQuery, useQuery } from "convex/react"
 import { useState } from "react"
 import { toast } from "sonner"
 
@@ -13,11 +14,13 @@ import DigitGroup from "@/components/digit-group"
 import DraftBadge from "@/components/draft-badge"
 import MatchesActiveFilters from "@/components/matches-active-filters"
 import MatchesFilterPanel from "@/components/matches-filter-panel"
+import MatchStatusBadge from "@/components/match-status-badge"
 import Reveal from "@/components/reveal"
 import StatCard from "@/components/stat-card"
+import StatCardGrid from "@/components/stat-card-grid"
 import TextSwap from "@/components/text-swap"
 import { formatTashkentDateTime } from "@/lib/format"
-import { applyMatchesFilters, parseMatchesSearch } from "@/lib/matches-filters"
+import { applyMatchesFilters, parseMatchesSearch, type MatchesView } from "@/lib/matches-filters"
 
 export const Route = createFileRoute("/_authenticated/matches/")({
   validateSearch: parseMatchesSearch,
@@ -31,15 +34,30 @@ function playerName(player: { firstName: string; lastName?: string } | null) {
 
 function MatchesList() {
   const player = useQuery(api.players.getCurrentPlayer)
-  const matches = useQuery(api.matches.listUpcomingForPlayer)
+  const upcomingMatches = useQuery(api.matches.listUpcomingForPlayer)
+  const {
+    results: allMatches,
+    status: allStatus,
+    loadMore: loadMoreAll,
+  } = usePaginatedQuery(api.matches.listAllForPlayerPage, {}, { initialNumItems: 20 })
+  const {
+    results: pastMatches,
+    status: pastStatus,
+    loadMore: loadMorePast,
+  } = usePaginatedQuery(api.matches.listPastForPlayerPage, {}, { initialNumItems: 20 })
   const repostToGroup = useMutation(api.boardState.repostToGroup)
   const [reposting, setReposting] = useState(false)
   const search = Route.useSearch()
   const navigate = Route.useNavigate()
 
-  const filtered = matches
-    ? applyMatchesFilters(matches, search, player?._id)
-    : undefined
+  const view: MatchesView = search.view ?? "active"
+  const matches = view === "all" ? allMatches : view === "past" ? pastMatches : upcomingMatches
+  const paginatedStatus = view === "all" ? allStatus : view === "past" ? pastStatus : null
+  const loadMore = view === "all" ? loadMoreAll : loadMorePast
+  const isLoadingFirstPage =
+    paginatedStatus !== null ? paginatedStatus === "LoadingFirstPage" : matches === undefined
+
+  const filtered = matches ? applyMatchesFilters(matches, search, player?._id) : undefined
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
@@ -72,12 +90,37 @@ function MatchesList() {
         )}
       </div>
 
-      {matches && matches.length > 0 && (
-        <div className="grid grid-cols-3 gap-3">
-          <StatCard label="Предстоящих игр" value={matches.length} to="/matches" />
+      <Tabs
+        value={view}
+        onValueChange={(value) =>
+          navigate({
+            search: (prev) => ({
+              ...prev,
+              view: value === "active" ? undefined : (value as MatchesView),
+            }),
+          })
+        }
+      >
+        <TabsList className="w-full sm:w-fit">
+          <TabsIndicator />
+          <TabsTab value="all" className="flex-1 sm:flex-none">
+            Все игры
+          </TabsTab>
+          <TabsTab value="active" className="flex-1 sm:flex-none">
+            Активные
+          </TabsTab>
+          <TabsTab value="past" className="flex-1 sm:flex-none">
+            Прошедшие
+          </TabsTab>
+        </TabsList>
+      </Tabs>
+
+      {upcomingMatches && upcomingMatches.length > 0 && (
+        <StatCardGrid>
+          <StatCard label="Предстоящих игр" value={upcomingMatches.length} to="/matches" />
           <StatCard
             label="Свободных мест"
-            value={matches.reduce(
+            value={upcomingMatches.reduce(
               (sum, { match, roster }) => sum + Math.max(match.maxMembers - roster.length, 0),
               0,
             )}
@@ -87,16 +130,16 @@ function MatchesList() {
           <StatCard
             label="Заполненность"
             value={`${Math.round(
-              (matches.reduce((sum, { roster }) => sum + roster.length, 0) /
+              (upcomingMatches.reduce((sum, { roster }) => sum + roster.length, 0) /
                 Math.max(
-                  matches.reduce((sum, { match }) => sum + match.maxMembers, 0),
+                  upcomingMatches.reduce((sum, { match }) => sum + match.maxMembers, 0),
                   1,
                 )) *
                 100,
             )}%`}
             to="/matches"
           />
-        </div>
+        </StatCardGrid>
       )}
 
       {matches && matches.length > 0 && (
@@ -116,7 +159,7 @@ function MatchesList() {
         </div>
       )}
 
-      {matches === undefined ? (
+      {isLoadingFirstPage ? (
         <div className="flex flex-col gap-4">
           {[0, 1].map((i) => (
             <Card key={i}>
@@ -137,15 +180,17 @@ function MatchesList() {
         </div>
       ) : (
         <Reveal>
-          {matches.length === 0 ? (
+          {matches!.length === 0 ? (
             <Empty>
-              <EmptyTitle>Пока нет игр</EmptyTitle>
+              <EmptyTitle>
+                {view === "past" ? "Пока нет прошедших игр" : "Пока нет игр"}
+              </EmptyTitle>
               <EmptyDescription>
                 {player?.isAdmin
                   ? "Создай первую игру, и она появится на доске в группе."
                   : "Как только админ создаст игру, она появится здесь."}
               </EmptyDescription>
-              {player?.isAdmin && (
+              {player?.isAdmin && view !== "past" && (
                 <Button render={<Link to="/matches/new" />} className="mt-4">
                   + Новая игра
                 </Button>
@@ -166,6 +211,7 @@ function MatchesList() {
                         <CardTitle className="text-base font-medium capitalize">
                           {formatTashkentDateTime(match.startsAt, "long")}
                         </CardTitle>
+                        <MatchStatusBadge match={match} rosterCount={roster.length} />
                         {player?.isAdmin && <DraftBadge show={!match.isPublished} />}
                       </div>
                       <p className="text-sm text-muted-foreground">
@@ -215,6 +261,18 @@ function MatchesList() {
                   </Card>
                 </Link>
               ))}
+
+              {paginatedStatus !== null && paginatedStatus !== "Exhausted" && (
+                <Button
+                  variant="outline"
+                  disabled={paginatedStatus === "LoadingMore"}
+                  onClick={() => loadMore(20)}
+                >
+                  <TextSwap>
+                    {paginatedStatus === "LoadingMore" ? "Загружаем…" : "Показать ещё"}
+                  </TextSwap>
+                </Button>
+              )}
             </div>
           )}
         </Reveal>
