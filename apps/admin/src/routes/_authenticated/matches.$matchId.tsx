@@ -267,9 +267,8 @@ function MatchDetailPage() {
         showPromote={false}
         showActions={!!player?.isAdmin}
         showAttendance={!!player?.isAdmin && isPastMatch}
-        showPaid={!!match.pricePerPerson}
+        showPaid={!!match.pricePerPerson && !!player?.isAdmin}
         isAdmin={!!player?.isAdmin}
-        currentPlayerId={player?._id}
       />
 
       <MemberSection
@@ -278,6 +277,7 @@ function MatchDetailPage() {
         emptyText="Лист ожидания пуст."
         showPromote
         showActions={!!player?.isAdmin}
+        isAdmin={!!player?.isAdmin}
       />
 
       {player?.isAdmin && cancelled.length > 0 && (
@@ -287,6 +287,7 @@ function MatchDetailPage() {
           emptyText=""
           showPromote={false}
           showActions={false}
+          isAdmin={!!player?.isAdmin}
         />
       )}
 
@@ -309,7 +310,6 @@ function MemberSection({
   showAttendance = false,
   showPaid = false,
   isAdmin = false,
-  currentPlayerId,
 }: {
   title: string
   members: { membership: Doc<"memberships">; player: Doc<"players"> | null }[]
@@ -319,7 +319,6 @@ function MemberSection({
   showAttendance?: boolean
   showPaid?: boolean
   isAdmin?: boolean
-  currentPlayerId?: Id<"players">
 }) {
   const removeMember = useMutation(api.memberships.removeMember)
   const promoteFromWaitlist = useMutation(api.memberships.promoteFromWaitlist)
@@ -351,7 +350,17 @@ function MemberSection({
             {members.map(({ membership, player }) => (
               <TableRow key={membership._id}>
                 <TableCell>
-                  {player?.firstName} {player?.lastName ?? ""}
+                  {player ? (
+                    <Link
+                      to={isAdmin ? "/players/$playerId" : "/p/$playerId"}
+                      params={{ playerId: player._id }}
+                      className="hover:underline underline-offset-2"
+                    >
+                      {player.firstName} {player.lastName ?? ""}
+                    </Link>
+                  ) : (
+                    "—"
+                  )}
                   {player?.type === "guest" && (
                     <Badge variant="secondary" className="ml-2">
                       гость
@@ -391,28 +400,22 @@ function MemberSection({
                 )}
                 {showPaid && (
                   <TableCell>
-                    {isAdmin ? (
-                      <Button
-                        size="sm"
-                        variant={membership.paid ? "default" : "outline"}
-                        onClick={async () => {
-                          try {
-                            await setPaid({
-                              membershipId: membership._id,
-                              paid: !membership.paid,
-                            })
-                          } catch {
-                            toast.error("Не получилось отметить оплату")
-                          }
-                        }}
-                      >
-                        {membership.paid ? "✅ Оплачено" : "Отметить оплату"}
-                      </Button>
-                    ) : membership.playerId === currentPlayerId ? (
-                      <Badge variant={membership.paid ? "default" : "secondary"}>
-                        {membership.paid ? "Оплачено" : "Не оплачено"}
-                      </Badge>
-                    ) : null}
+                    <Button
+                      size="sm"
+                      variant={membership.paid ? "default" : "outline"}
+                      onClick={async () => {
+                        try {
+                          await setPaid({
+                            membershipId: membership._id,
+                            paid: !membership.paid,
+                          })
+                        } catch {
+                          toast.error("Не получилось отметить оплату")
+                        }
+                      }}
+                    >
+                      {membership.paid ? "✅ Оплачено" : "Отметить оплату"}
+                    </Button>
                   </TableCell>
                 )}
                 {showActions && (

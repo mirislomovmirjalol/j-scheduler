@@ -390,11 +390,20 @@ export const getMatchDetail = query({
       .withIndex("by_match", (q) => q.eq("matchId", matchId))
       .take(400);
 
+    // Payment status is private — only an admin, or the player it belongs
+    // to, should ever receive it over the wire. Redacting here (not just
+    // hiding it in the UI) matters: the raw query response is otherwise
+    // inspectable regardless of what the frontend chooses to render.
+    const redactPaid = (m: Doc<"memberships">): Doc<"memberships"> =>
+      player.isAdmin || m.playerId === player._id
+        ? m
+        : { ...m, paid: undefined };
+
     const members = await Promise.all(
       memberships
         .filter((m) => !m.isDeleted)
         .map(async (m) => ({
-          membership: m,
+          membership: redactPaid(m),
           player: await ctx.db.get("players", m.playerId),
         })),
     );
