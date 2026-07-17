@@ -1,4 +1,4 @@
-import { paginationOptsValidator } from "convex/server";
+import { paginationOptsValidator, type PaginationOptions } from "convex/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -184,6 +184,21 @@ export const editMatch = mutation({
     await ctx.db.patch("matches", matchId, patch);
 
     if (isReschedule) {
+      // Keep the denormalized matchStartsAt on every live membership in
+      // sync — it drives the player-history pagination sort order (see
+      // schema.ts comment), so a stale copy would silently misfile this
+      // match into the wrong spot in someone's history.
+      const liveMemberships = await ctx.db
+        .query("memberships")
+        .withIndex("by_match", (q) => q.eq("matchId", matchId))
+        .collect();
+      for (const membership of liveMemberships) {
+        if (membership.isDeleted) continue;
+        await ctx.db.patch("memberships", membership._id, {
+          matchStartsAt: patch.startsAt,
+        });
+      }
+
       // Cancel stale, not-yet-fired reminder jobs before scheduling new ones
       // for the new time — otherwise players get pinged for the old slot.
       // Already-fired rows are left alone (nothing to cancel, and the
@@ -660,6 +675,59 @@ export const listMyHistory = query({
   },
 });
 
+// Backs every paginated player-history view (own history, admin-viewed
+// history, no-shows) — cursor-paginates memberships.by_player_and_matchStartsAt
+// (see schema.ts comment on that field) so history never silently drops old
+// rows the way a bounded take() eventually would. role/isDeleted filtering
+// happens after paginate(), same tradeoff already accepted elsewhere in this
+// file (listAllForPlayerPage's isPublished filter): a filtered-heavy page
+// can come back shorter than requested, which is fine for a "Показать ещё"
+// button but would be wrong for anything expecting exact page sizes.
+async function paginateMembershipHistory(
+  ctx: QueryCtx,
+  playerId: Id<"players">,
+  role: "roster" | "waitlist" | undefined,
+  paginationOpts: PaginationOptions,
+) {
+  const result = await ctx.db
+    .query("memberships")
+    .withIndex("by_player_and_matchStartsAt", (q) =>
+      q.eq("playerId", playerId).lt("matchStartsAt", Date.now()),
+    )
+    .order("desc")
+    .paginate(paginationOpts);
+
+  const page = await Promise.all(
+    result.page
+      .filter((m) => !m.isDeleted && (role === undefined || m.role === role))
+      .map(async (m) => ({ membership: m, match: await ctx.db.get("matches", m.matchId) })),
+  );
+
+  return {
+    page: page.filter(
+      (row): row is { membership: Doc<"memberships">; match: Doc<"matches"> } =>
+        !!row.match && !row.match.isDeleted,
+    ),
+    isDone: result.isDone,
+    continueCursor: result.continueCursor,
+  };
+}
+
+// Paginated sibling of listMyHistory — that one stays bounded/unpaginated
+// on purpose, it only ever backs the "Сыграно игр" stat-card counts, not a
+// scrollable list. This is what the actual history list renders from.
+export const listMyHistoryPage = query({
+  args: {
+    paginationOpts: paginationOptsValidator,
+    role: v.optional(v.union(v.literal("roster"), v.literal("waitlist"))),
+  },
+  handler: async (ctx, { paginationOpts, role }) => {
+    const player = await requireAuthedPlayer(ctx).catch(() => null);
+    if (!player) return { page: [], isDone: true, continueCursor: "" };
+    return paginateMembershipHistory(ctx, player._id, role, paginationOpts);
+  },
+});
+
 // Distinct court/format/level values from recent matches, for the match
 // form's autocomplete — database-backed (not the browser's own autofill),
 // so a value entered on one device suggests on any other. No venue table
@@ -726,56 +794,42 @@ export const listAllForCalendar = query({
   },
 });
 
-// A specific player's match history — same shape as listMyHistory, but for
-// an admin looking up any player (the dedicated player profile page).
-export const listHistoryForPlayer = query({
-  args: { playerId: v.id("players") },
-  handler: async (ctx, { playerId }) => {
+// A specific player's match history — same shape as listMyHistoryPage, but
+// for an admin looking up any player (the dedicated player profile page).
+// Paginated for the same reason as listMyHistoryPage: no natural upper
+// bound on how long a player has been in the community.
+export const listHistoryForPlayerPage = query({
+  args: { playerId: v.id("players"), paginationOpts: paginationOptsValidator },
+  handler: async (ctx, { playerId, paginationOpts }) => {
     // Graceful-degrade on a transient auth race (see players.listAll).
-    if (!(await requireAdminPlayer(ctx).catch(() => null))) return [];
-
-    const memberships = await ctx.db
-      .query("memberships")
-      .withIndex("by_player", (q) => q.eq("playerId", playerId))
-      .take(200);
-
-    const now = Date.now();
-    const withMatch = await Promise.all(
-      memberships
-        .filter((m) => !m.isDeleted)
-        .map(async (m) => {
-          const match = await ctx.db.get("matches", m.matchId);
-          return { membership: m, match };
-        }),
-    );
-
-    const past: { membership: Doc<"memberships">; match: Doc<"matches"> }[] = [];
-    for (const row of withMatch) {
-      if (row.match && !row.match.isDeleted && row.match.startsAt < now) {
-        past.push({ membership: row.membership, match: row.match });
-      }
+    if (!(await requireAdminPlayer(ctx).catch(() => null))) {
+      return { page: [], isDone: true, continueCursor: "" };
     }
-
-    return past.sort((a, b) => b.match.startsAt - a.match.startsAt);
+    return paginateMembershipHistory(ctx, playerId, undefined, paginationOpts);
   },
 });
 
-// Admin-only complement to listHistoryForPlayer — matches this player was
-// on the ROSTER for but got flagged as a no-show (memberships.setNoShow),
+// Admin-only complement to listHistoryForPlayerPage — matches this player
+// was on the ROSTER for but got flagged as a no-show (memberships.setNoShow),
 // surfaced on the admin player-profile page so an admin can see attendance
-// reliability at a glance. Not shown on the public profile.
-export const listNoShowsForPlayer = query({
-  args: { playerId: v.id("players") },
-  handler: async (ctx, { playerId }) => {
-    if (!(await requireAdminPlayer(ctx).catch(() => null))) return [];
+// reliability at a glance. Not shown on the public profile. Paginated too —
+// a chronically-flaky player's no-show list is the last thing that should
+// silently stop growing past some fixed cap.
+export const listNoShowsForPlayerPage = query({
+  args: { playerId: v.id("players"), paginationOpts: paginationOptsValidator },
+  handler: async (ctx, { playerId, paginationOpts }) => {
+    if (!(await requireAdminPlayer(ctx).catch(() => null))) {
+      return { page: [], isDone: true, continueCursor: "" };
+    }
 
-    const memberships = await ctx.db
+    const result = await ctx.db
       .query("memberships")
-      .withIndex("by_player", (q) => q.eq("playerId", playerId))
-      .take(200);
+      .withIndex("by_player_and_matchStartsAt", (q) => q.eq("playerId", playerId))
+      .order("desc")
+      .paginate(paginationOpts);
 
-    const withMatch = await Promise.all(
-      memberships
+    const page = await Promise.all(
+      result.page
         .filter((m) => !m.isDeleted && m.role === "roster" && m.noShow)
         .map(async (m) => {
           const match = await ctx.db.get("matches", m.matchId);
@@ -783,12 +837,14 @@ export const listNoShowsForPlayer = query({
         }),
     );
 
-    return withMatch
-      .filter(
+    return {
+      page: page.filter(
         (row): row is { membership: Doc<"memberships">; match: Doc<"matches"> } =>
           !!row.match && !row.match.isDeleted,
-      )
-      .sort((a, b) => b.match.startsAt - a.match.startsAt);
+      ),
+      isDone: result.isDone,
+      continueCursor: result.continueCursor,
+    };
   },
 });
 

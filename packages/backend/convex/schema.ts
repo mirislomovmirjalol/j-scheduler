@@ -135,12 +135,25 @@ export default defineSchema({
     // Admin-toggled from the dashboard; roster only (waitlist isn't playing
     // yet, nothing to collect).
     paid: v.optional(v.boolean()),
+
+    // Denormalized copy of matches.startsAt, kept in sync at membership
+    // creation (joinOrResurrectMembership, addGuestToMatch) and on reschedule
+    // (editMatch). Exists purely so a player's match history can be
+    // cursor-paginated sorted by game date: memberships.by_player is only
+    // ordered by playerId, and Convex can't paginate ordered by a joined
+    // table's field without this copy living on the row being paginated.
+    // Optional (not backfilled automatically) — see
+    // maintenance.backfillMembershipMatchStartsAt for existing rows.
+    matchStartsAt: v.optional(v.number()),
   })
     .index("by_match", ["matchId"])
     .index("by_match_and_role", ["matchId", "role"])
     .index("by_player", ["playerId"])
     // Guard against a double-Join creating two live rows for the same pair.
-    .index("by_match_and_player", ["matchId", "playerId"]),
+    .index("by_match_and_player", ["matchId", "playerId"])
+    // Cursor-paginated player history, sorted by game date (see comment on
+    // matchStartsAt above).
+    .index("by_player_and_matchStartsAt", ["playerId", "matchStartsAt"]),
 
   // ─────────────────────────────────────────────────────────────────────────
   // BOARD STATE — the single live "board" message per chat.

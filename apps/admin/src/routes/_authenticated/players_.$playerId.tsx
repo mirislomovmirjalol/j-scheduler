@@ -5,7 +5,7 @@ import { Button } from "@J-schedule/ui/components/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@J-schedule/ui/components/card"
 import { Skeleton } from "@J-schedule/ui/components/skeleton"
 import { createFileRoute, Navigate } from "@tanstack/react-router"
-import { useQuery } from "convex/react"
+import { usePaginatedQuery, useQuery } from "convex/react"
 import { toast } from "sonner"
 
 import BackButton from "@/components/back-button"
@@ -13,6 +13,7 @@ import MatchHistoryList from "@/components/match-history-list"
 import NoShowList from "@/components/no-show-list"
 import PlayerActivityCalendar from "@/components/player-activity-calendar"
 import Reveal from "@/components/reveal"
+import TextSwap from "@/components/text-swap"
 import { useAdminGuard } from "@/lib/use-admin-guard"
 
 export const Route = createFileRoute("/_authenticated/players_/$playerId")({
@@ -24,8 +25,16 @@ function PlayerProfilePage() {
   const { playerId } = Route.useParams()
   const id = playerId as Id<"players">
   const player = useQuery(api.players.getById, { playerId: id })
-  const history = useQuery(api.matches.listHistoryForPlayer, { playerId: id })
-  const noShows = useQuery(api.matches.listNoShowsForPlayer, { playerId: id })
+  const {
+    results: history,
+    status: historyStatus,
+    loadMore: loadMoreHistory,
+  } = usePaginatedQuery(api.matches.listHistoryForPlayerPage, { playerId: id }, { initialNumItems: 20 })
+  const {
+    results: noShows,
+    status: noShowsStatus,
+    loadMore: loadMoreNoShows,
+  } = usePaginatedQuery(api.matches.listNoShowsForPlayerPage, { playerId: id }, { initialNumItems: 20 })
 
   if (isChecking || player === undefined) {
     return (
@@ -81,7 +90,7 @@ function PlayerProfilePage() {
 
       <div>
         <h2 className="mb-2 text-lg font-medium">История игр</h2>
-        {history === undefined ? (
+        {historyStatus === "LoadingFirstPage" ? (
           <div className="flex flex-col gap-2">
             {[0, 1, 2].map((i) => (
               <Card key={i}>
@@ -96,23 +105,45 @@ function PlayerProfilePage() {
             ))}
           </div>
         ) : (
-          <Reveal>
+          <Reveal className="flex flex-col gap-3">
             <MatchHistoryList
               entries={history}
               emptyTitle="Пока нет прошедших игр"
               emptyDescription="Сыгранные игры появятся здесь."
             />
+            {historyStatus !== "Exhausted" && (
+              <Button
+                variant="outline"
+                disabled={historyStatus === "LoadingMore"}
+                onClick={() => loadMoreHistory(20)}
+              >
+                <TextSwap>
+                  {historyStatus === "LoadingMore" ? "Загружаем…" : "Показать ещё"}
+                </TextSwap>
+              </Button>
+            )}
           </Reveal>
         )}
       </div>
 
       <div>
         <h2 className="mb-2 text-lg font-medium">Пропущенные игры</h2>
-        {noShows === undefined ? (
+        {noShowsStatus === "LoadingFirstPage" ? (
           <Skeleton className="h-16 w-full" />
         ) : (
-          <Reveal>
+          <Reveal className="flex flex-col gap-3">
             <NoShowList entries={noShows} />
+            {noShowsStatus !== "Exhausted" && (
+              <Button
+                variant="outline"
+                disabled={noShowsStatus === "LoadingMore"}
+                onClick={() => loadMoreNoShows(20)}
+              >
+                <TextSwap>
+                  {noShowsStatus === "LoadingMore" ? "Загружаем…" : "Показать ещё"}
+                </TextSwap>
+              </Button>
+            )}
           </Reveal>
         )}
       </div>

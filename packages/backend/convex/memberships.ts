@@ -81,6 +81,7 @@ async function joinOrResurrectMembership(
       isDeleted: false,
       joinedAt: Date.now(),
       addedBy,
+      matchStartsAt: match.startsAt,
     });
   } else {
     await ctx.db.insert("memberships", {
@@ -90,6 +91,7 @@ async function joinOrResurrectMembership(
       joinedAt: Date.now(),
       addedBy,
       isDeleted: false,
+      matchStartsAt: match.startsAt,
     });
   }
 
@@ -371,6 +373,7 @@ export const addGuestToMatch = mutation({
       joinedAt: Date.now(),
       addedBy: { admin: admin._id },
       isDeleted: false,
+      matchStartsAt: match.startsAt,
     });
 
     await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});

@@ -1,5 +1,32 @@
 import { internalMutation } from "./_generated/server";
 
+// One-off backfill: sets memberships.matchStartsAt on any row that predates
+// the field (see schema.ts comment on matchStartsAt) — without this, old
+// rows would sort incorrectly (or drop out of range entirely) in the
+// cursor-paginated player-history queries that rely on it. Safe to run
+// repeatedly (skips rows that already have it).
+//
+// Run with: bunx convex run maintenance:backfillMembershipMatchStartsAt
+// (add --prod only if prod ever has memberships predating this field —
+// at the time this was written, prod had none).
+export const backfillMembershipMatchStartsAt = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const memberships = await ctx.db.query("memberships").collect();
+    let updated = 0;
+    for (const membership of memberships) {
+      if (membership.matchStartsAt !== undefined) continue;
+      const match = await ctx.db.get("matches", membership.matchId);
+      if (!match) continue;
+      await ctx.db.patch("memberships", membership._id, {
+        matchStartsAt: match.startsAt,
+      });
+      updated++;
+    }
+    return { checked: memberships.length, updated };
+  },
+});
+
 // One-off reset: wipes every match, membership, board message pointer,
 // reminder job, and dedup/login-request row — keeps only players with
 // isAdmin: true (deletes every other player row, guests included).
