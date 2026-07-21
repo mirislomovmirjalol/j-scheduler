@@ -1,498 +1,365 @@
-# Project audit — backend, admin panel, docs
+# One Padel — product & growth ideas
 
-Full audit of the monorepo as of 2026-07-07 (branch `main`, `a673011`): the Convex
-backend (`packages/backend`), the new admin panel (`apps/admin`), the retiring
-`apps/web`, shared packages, and CLAUDE.md / TODO.md.
+Fresh strategic audit of the whole product as of **2026-07-20** (branch `main`,
+head `c44de7a`). This replaces the earlier code/bug audit (that pass is done —
+its findings were applied and shipped; this file is a clean slate for *ideas*,
+not defects).
 
-**Status (2026-07-10):** all recommendations below (except the strings-module
-centralization, deliberately deferred — see §4.2) have been applied,
-typechecked, validated against the dev Convex deployment, and deployed to
-prod (backend) and Vercel production (admin app). The three items that
-changed what a mutation accepts (§2.4, §2.6, §2.8) were held for explicit
-confirmation before implementing, per instruction not to change business
-logic without asking — two were approved and shipped, one declined. Status
-is marked inline throughout.
+**Method:** read the full surface — Convex backend (`packages/backend`), admin
+dashboard (`apps/admin`, running live on `:3002`), marketing site (`apps/web`),
+the Telegram board/DM/command layer, and the data model — then looked at it as a
+**player, admin, business owner, and investor** in turn. UI/UX notes are grounded
+in the actual components and CSS, not screenshots.
 
-Calibration used throughout: ~100–200 members, 3–7 matches/week, single
-community today with a possible multi-community future, no fixed launch date
-(findings ranked by impact, not urgency).
+**Calibration:** ~100–200 members, 3–7 matches/week, single community in
+Tashkent, Russian-only, manual payments (card transfer), one or two admins. No
+fixed launch date — ideas are ranked by **leverage**, not urgency.
 
----
-
-## 1. Executive summary
-
-The core is in good shape. The backend honors its own golden rules almost
-everywhere that matters: every domain write goes through a shared mutation, all
-admin-gated functions really do check `isAdmin` server-side via
-`requireAdminPlayer`, timestamps are UTC-only with Tashkent conversion at the
-edges, deletes are soft, Telegram side effects live in actions, and the hard
-Telegram gotchas (secret token, update dedup, 429 backoff, 403→`wantsDms`,
-4096-char guard, last-seat concurrency) are all handled. The admin app covers
-the full v1 feature surface with live data — no mocks, no dead buttons.
-
-The risk is concentrated in three places:
-
-1. **Silent-failure paths in the bot plumbing** — the dead-man's-switch cries
-   wolf on every short-notice match (§2.1), and a webhook handler error
-   permanently swallows the user's tap (§2.2). These are exactly the "fails
-   silently, discovered on game day" failures CLAUDE.md §9 warns about.
-2. **Seat-lifecycle inconsistencies** — an admin removal doesn't tell the
-   waitlist a seat freed (§2.3), and capacity edits can silently corrupt the
-   board math (§2.4).
-3. **Docs that no longer describe the product** — CLAUDE.md's "locked" board
-   model (collapsed rosters) is not what ships (inline rosters, deliberate
-   change), the tech-stack table describes the retired architecture, and the
-   burial feature exists only as dead schema fields (§4, §6).
-
-Top five actions, in order: fix the dead-man's-switch false positives (2.1),
-fix webhook dedup ordering (2.2), notify the waitlist on admin removal (2.3),
-guard `maxMembers` decreases (2.4), and bring CLAUDE.md/TODO.md back in line
-with reality (§6).
+**Deployment model (confirmed):** this stays **single-tenant**. Growth to other
+communities happens by **forking and redeploying a separate instance** (its own
+Convex deployment, its own bot, its own admin site) — never multiple communities
+on one server. That's a deliberate, cleaner choice than multi-tenant SaaS: it
+means the single-tenant assumptions (`TELEGRAM_CHAT_ID`, global `isAdmin`, one bot
+token) are **correct design, not debt**. The thing that matters instead is
+**redeployability** — how much of a fresh instance is a config change vs. a
+code hunt (see §F).
 
 ---
 
-## 2. Bugs & edge cases (ranked by impact)
+## TL;DR — the five highest-leverage moves
 
-2.3, 2.4, 2.6, and 2.8 all change what a mutation accepts or does, not just
-internal correctness. 2.3 turned out to already be fixed by later work
-(`dropMembership` unification). 2.4 and 2.6 were confirmed and shipped; 2.8
-was reviewed and explicitly declined — kept as-is. Everything else in this
-section is applied and live.
+| # | Idea | Who it helps | Impact | Effort |
+|---|------|--------------|--------|--------|
+| 1 | **Waitlist auto-offer with confirmation** — stop leaking filled seats | Owner, Player, Admin | 🔥🔥🔥 | M |
+| 2 | **Money layer: court-cost per match + per-player balance + pay-link** | Owner, Investor | 🔥🔥🔥 | M |
+| 3 | **Match templates / "duplicate last week"** — kill repetitive admin work | Admin | 🔥🔥 | S |
+| 4 | **Frictionless reminders + "Add to calendar"** — the retention basics | Player | 🔥🔥 | S |
+| 5 | **A real "business health" view** (fill rate, revenue, retention, no-shows) | Owner, Investor | 🔥🔥 | M |
 
-### 2.1 Dead-man's-switch false positives — your only alarm channel trains you to ignore it ✅ applied
-
-`scheduleReminders` deliberately skips any reminder lead already in the past
-(`packages/backend/convex/matches.ts:60` — a match created 2h out gets no
-T-3h row). But `listOverdueUnfired` treats a *missing* row as a silent failure
-(`packages/backend/convex/matchReminders.ts:59`: `if (!row || ...)`). Result:
-every match created inside its 3h/30m window triggers the hourly
-`DEAD MAN'S SWITCH` error, forever, until the match starts. At 3–7 matches a
-week, short-notice games are routine — the alert channel becomes noise, and
-the day a reminder genuinely fails silently, nobody will notice. This defeats
-the entire purpose of CLAUDE.md §9.
-
-**Fix sketch:** insert a row with `firedAt: Date.now()` (or a dedicated
-`skipped` marker) for leads that are skipped at scheduling time, so "never
-scheduled on purpose" is distinguishable from "scheduled and lost". Cheaper
-alternative: in `listOverdueUnfired`, ignore leads whose `dueAt` predates the
-match's `createdAt`.
-
-### 2.2 Webhook dedup ordering permanently drops failed updates ✅ applied
-
-`recordIfNew` marks the `update_id` processed **before** the handlers run
-(`packages/backend/convex/telegram/webhook.ts:32-48`), and the handler calls
-are awaited inside the same httpAction. If `handleMessage` /
-`handleCallbackQuery` throws (transient Convex error, Telegram API hiccup
-inside the action), the request returns non-200, Telegram retries — and the
-retry is deduped away with a 200. The user's Join tap is gone with no record
-except a log line. Telegram's retry mechanism, which exists precisely to
-survive this, is neutralized.
-
-**Fix sketch:** record the update as processed only after handlers complete
-(check-then-record-after-success), or wrap handler dispatch so a failure
-deletes the dedup row before rethrowing. The double-processing risk this
-reintroduces is already mitigated by the idempotent design of `joinMatch`
-(re-tap returns `alreadyJoined`).
-
-### 2.3 Admin `removeMember` frees a seat silently; self-drop doesn't ✅ already fixed (unrelated later commit)
-
-*Update:* `memberships.ts` now routes both self-drop and admin removal
-through a shared `dropMembership` helper that notifies the waitlist
-regardless of who triggered the departure — this was fixed by the
-self-serve-leave/admin-cancellation-tracking work, independent of this audit.
-Original finding kept below for context.
-
-Self-drop notifies the waitlist when a roster player leaves
-(`packages/backend/convex/memberships.ts:106-110` →
-`extraSeatsOpened`), but admin removal of a roster player
-(`memberships.ts:119-130`) only DMs the removed player. The freed seat sits
-invisible to the waitlist until someone re-reads the board. At ~150 members
-with active waitlists this is a real fill-rate leak, and it's inconsistent:
-the same event (roster seat freed) produces different downstream behavior
-depending on who triggered it.
-
-**Fix sketch:** in `removeMember`, when the removed membership's role was
-`roster`, schedule `extraSeatsOpened` exactly as `dropMatch` does.
-
-### 2.4 `editMatch` allows `maxMembers` below current roster count ✅ applied (confirmed)
-
-No guard in `matches.ts:163-169` — lowering `maxMembers` from 6 to 4 with 6
-on the roster demotes nobody and produces `spotsLeft = -2`
-(`packages/backend/convex/lib/board.ts:84`), a board reading `👥 6/4 ·
-заполнено`, and a match that behaves inconsistently everywhere counts are
-compared. Nothing recovers this state except editing the number back.
-
-**Fix sketch (v1-cheap):** reject a decrease below the live roster count in
-the mutation with a Russian error the dashboard can toast ("Сначала уберите
-игроков из состава"). Auto-demotion to waitlist is a policy decision — don't
-build it without deciding *who* gets demoted (last-joined?).
-
-### 2.5 Reminder-job cancellation capped at `.take(10)` ✅ applied
-
-Reschedule and cancel both fetch at most 10 `matchReminders` rows
-(`matches.ts:179`, `matches.ts:233`; also `markFired` at
-`matchReminders.ts:23`). Fired rows persist up to 7 days (`pruneFired`), and
-each reschedule adds up to 2 rows. A match rescheduled 5+ times within a week
-can push a not-yet-fired row past the first 10 — its stale job escapes
-cancellation and pings the roster about the *old* time. Low probability,
-maximally confusing when it hits (wrong-time reminders destroy trust in the
-reminder layer).
-
-**Fix sketch:** use `.collect()` — the per-match row count is tiny; the cap
-protects nothing here.
-
-### 2.6 `joinMatch` ignores `isPublished` ✅ applied (confirmed)
-
-`memberships.ts:21-24` checks only `isDeleted`. An unpublished match with a
-stale button (board not yet re-synced, or a forged `callback_data`) accepts
-joins into a draft. Today the window is small because `unpublishMatch`
-triggers a board sync, but the mutation is the single write path and should
-enforce its own invariant rather than trusting the board to have caught up.
-
-**Fix sketch:** treat `!match.isPublished` like `match_gone` (same "игра
-опустилась ниже" style answer, or a dedicated "игра снята с доски" string).
-
-### 2.7 `webLoginRequests`: unbounded growth + unauthenticated spam vector ✅ prune cron applied (rate limiting still deferred, as recommended)
-
-`webLogin.create` (`packages/backend/convex/webLogin.ts:20`) is a public,
-argument-less, unauthenticated mutation — every call inserts a row. There is
-no prune cron (unlike `processedUpdates`), so expired/consumed rows accumulate
-forever, and anyone who finds the Convex URL can insert rows at will. Not a
-security hole (codes are 128-bit random; `getStatus` leaks nothing without a
-valid code), but it's the one table with no garbage collection and the one
-public write with no friction.
-
-**Fix sketch:** add a prune to `crons.ts` (delete rows older than ~1h); rate
-limiting can wait until there's evidence of abuse.
-
-### 2.8 No last-admin guard on `setIsAdmin` ❌ declined — kept as-is by explicit choice
-
-`players.ts:195-201` lets any admin demote anyone, including themselves,
-including the last admin. One mistap in the players table and nobody can
-manage matches, promote, or re-grant admin — recovery requires the Convex
-dashboard. Same class of risk: `softDeletePlayer` on yourself.
-
-**Fix sketch:** in `setIsAdmin`, when demoting, count remaining live admins
-and reject if it would hit zero (and consider rejecting self-demotion
-outright). Same check in `softDeletePlayer` for admin rows.
-
-### 2.9 Minor / accepted-risk items
-
-- **Board sync fan-out:** every join/edit/drop schedules its own `syncBoard`;
-  concurrent runs converge (each recomputes from live state) but race on
-  `editMessageText` and waste API calls. Fine at this scale; a debounce
-  (skip if another sync is queued) is the eventual fix. (Known, documented in
-  TODO.md M5.)
-- **`sendReminder` fires for matches rescheduled into the past** — only
-  `isDeleted` is checked (`telegram/reminders.ts:18`). Edge of an edge; a
-  `match.startsAt > Date.now()` check would close it.
-- **Add-guest dialog breaks silently on error** — see §4.3; the backend
-  mutation is fine, the dialog just doesn't catch.
-- **Rate-limit posture:** `callTelegramApi` handles 429 with `retry_after`
-  (3 attempts) and reminder sweeps are sequential — adequate for ~150
-  opted-in DMs. The "proactive queued sender" from TODO M2 remains fairly
-  deferred; revisit only if sweeps start tripping 429s in logs.
+Everything below expands these plus a long tail of smaller wins, tagged by
+perspective. Impact/effort are rough: S ≈ a day, M ≈ a few days, L ≈ a week+.
 
 ---
 
-## 3. Unused / dead code inventory
+## A. Fill-rate & the re-fill loop — the single biggest lever
 
-### 3.1 Backend (`packages/backend/convex`)
+The core loop that *fills* a match works well (one-tap join, live board,
+waitlist). The loop that **re-fills** a match still leaks, and every empty seat
+is money someone eats (court cost is fixed; `pricePerPerson × empty seat` is lost
+revenue). Seats free three ways — self-drop, admin removal, cancellation — and
+today refilling depends on an admin *noticing* and manually calling
+`promoteFromWaitlist`. `dropMembership` already fires `extraSeatsOpened` to the
+waitlist, but that's just a "a seat opened, wait for an admin" nudge.
 
-| Item | Location | Status |
-| --- | --- | --- |
-| `matches.unpublishMatch` | `matches.ts:125` | ✅ **deleted** (zero callers, no UI for it). |
-| `matches.listAllForCalendar` | `matches.ts:512` | Left untouched, as decided — paired with the orphaned charts in §3.2. |
-| `auth.getCurrentUser` | `auth.ts:73` | ✅ **deleted** (dead, frontends use the component-generated `getAuthUser`). |
-| `players.reminderLeadMin` field | `schema.ts` | ✅ **removed** from schema (confirmed zero references anywhere before removal). |
-| `matches.durationMin` | schema + `matches.ts` | ✅ **comment fixed** — field kept (display value), no longer claims it drives reminders. |
-| `boardState.messagesSincePost`, `lastPostedAt` | `schema.ts`, `boardState.ts` | ✅ **stopped writing**, marked `v.optional()` + deprecated in schema. Not hard-removed: Convex validates stored documents against the schema, and the live `boardState` row still has these set — a full removal needs a data migration first, which felt like more risk than the cleanup was worth. Functionally dead either way. |
-| Indexes `players.by_type`, `players.by_isAdmin`, `matches.by_startsAt` | `schema.ts` | ✅ **deleted** (confirmed zero `.withIndex()` callers). `players.listAll` genuinely needs all rows regardless, so there was no query to "fix" — CLAUDE.md §7's index rule was reworded to allow bounded scans on small tables instead of pretending otherwise. |
+### A1. Waitlist auto-offer with confirmation 🔥🔥🔥 · M · *[Owner, Player, Admin]*
+The chosen v2 direction from the prior audit, still unbuilt and still #1. When a
+roster seat frees: DM the first waitlisted player «Место освободилось — забрать?»
+with a claim button and a time window (30–60 min; shorter inside T-3h). Unclaimed
+→ falls through to the next person → exhausted waitlist → today's behavior (board
+notice + admin). Admin curation becomes the *override*, not the bottleneck.
+- **Build on what exists:** `extraSeatsOpened`, DM inline buttons, the scheduler
+  pattern from reminders. Needs one new concept — a *pending offer* row with an
+  expiry job (mirror `matchReminders`).
+- **Player-side bonus:** show waitlist **position** ("ты 2-й в очереди") on the
+  board / `/my` / dashboard. Right now a waitlisted player has zero visibility
+  into whether they'll ever get in — a silent motivation killer.
 
-Intentionally *not* dead: `telegram/setWebhook.setWebhook` (manual-run
-operational helper).
+### A2. Late-drop awareness 🔥 · S · *[Owner, Admin]*
+A drop at T-30m almost never re-fills. Flag late drops (drop time vs `startsAt`)
+so admins can see who does it repeatedly, and optionally feed it into offer
+ordering (A1) and no-show reputation (D4). Data's already there (`joinedAt`,
+`removedBy`, `matchStartsAt`) — this is a read-side derivation, not new writes.
 
-### 3.2 Admin app (`apps/admin`)
-
-- **`src/components/match-calendar-heatmap.tsx` and
-  `src/components/match-trend-charts.tsx`** — fully built, mounted nowhere,
-  and **untracked in git** (`??`). Left untouched per decision, but two
-  warnings: (a) they are one `git clean` away from vanishing — commit them to
-  a branch if they represent real work; (b) they drag `recharts` +
-  `@J-schedule/ui/chart` into the dependency graph while shipping nothing.
-  The heatmap also has a Russian pluralization bug (`matchCount === 1 ?
-  "игра" : "игры"` — 5+ needs "игр").
-- `recharts` as a **direct** dep of `apps/admin/package.json` — **kept**, on
-  re-check: `match-trend-charts.tsx` (the preserved-per-decision orphan)
-  imports directly from `"recharts"`, not just through `@J-schedule/ui`'s
-  wrapper. Removing the dep would break that file. Left as-is.
-- `src/assets/react.svg` (unreferenced — turned out to be 4.1KB, not 0 bytes
-  as originally noted, doesn't change the outcome) — ✅ **deleted**. The
-  default Vite favicon (`index.html:5` → `/vite.svg`) is unchanged — no
-  actual icon asset to replace it with yet.
-
-### 3.3 Monorepo
-
-- **Retiring `apps/web` orphans zero backend code.** Both apps call the
-  identical Convex api surface (verified function-by-function). The retirement
-  fallout is UI-only: the `apps/web` tree, `packages/ui`'s
-  `dropdown-menu.tsx` (its sole consumer), and the SSR auth pieces
-  (`lib/auth-server.ts`, `routes/api/auth/$.ts`).
-- `packages/ui/package.json` suspect deps — audited: `@shadcn/react` had
-  **zero** references anywhere in the repo, ✅ **removed**. `shadcn` (the CLI)
-  is a real dev-time tool but was sitting in `dependencies`, ✅ **moved to
-  `devDependencies`**. `@base-ui/react` and `@fontsource-variable/outfit`
-  turned out to be genuinely used (base-ui backs alert-dialog/dialog/badge/
-  drawer/dropdown-menu; the font is `@import`ed in `globals.css`) — kept.
-- `/bts.jsonc` — ✅ **deleted** (self-described as safe to delete).
-- **Catalog drift:** the Bun workspace catalog exists but both apps hard-pin
-  around it — `@tanstack/react-router` `^1.168.22` (web) vs `^1.170.17`
-  (admin), `next-themes` literal in web vs `catalog:` in admin, three
-  different `@types/node` major lines across the repo. Pick one sourcing
-  strategy and let the catalog do its job.
-- **Vercel is linked to the old app** (root `.vercel` → project "web");
-  `apps/admin` has no Vercel project. The new dashboard is not deployed
-  anywhere. See the retirement checklist in §6.3.
+### A3. Auto-close / auto-unpublish stale drafts 💡 · S · *[Admin]*
+Drafts (`isPublished: false`) live forever. A "you have 2 unpublished drafts
+starting soon" nudge, or auto-archive of drafts whose `startsAt` has passed,
+keeps the matches list honest.
 
 ---
 
-## 4. Consistency vs CLAUDE.md rules
+## B. Money — turn the tool into a business dashboard
 
-### 4.1 What's compliant (verified, not assumed)
+Payment *tracking* shipped (`memberships.paid` toggle, "Оплатили: 3/6" line, the
+`/pay` command with `communitySettings.paymentInfo`). But it stops at a manual
+checkbox. There is no notion of **cost, margin, or who owes what across time** —
+which is exactly the data a business owner and an investor care about most.
 
-- **Golden Rule 1 (single write path):** no domain-table writes outside the
-  shared mutations, in either app or the bot path.
-- **Admin gating:** every admin mutation and query resolves the caller via
-  `requireAdminPlayer` (`players.ts:149`) from the verified session — never a
-  client-supplied id. The SPA's client-side gating (`use-admin-guard.ts`) is
-  UX, not security, and that's correctly documented in the file itself.
-- **Soft deletes:** domain tables are soft-delete only; hard deletes exist
-  only on sanctioned ephemeral tables (`processedUpdates`, `matchReminders`).
-- **Time:** all storage is UTC epoch millis; Tashkent conversion only at the
-  edges (`convex/lib/time.ts`, `apps/admin/src/lib/format.ts` /
-  `tashkent-time.ts`). No browser-local leakage in the admin app.
-- **Telegram gotchas (§6 of CLAUDE.md):** all handled except automatic burial
-  repost — secret token, dedup (but see bug 2.2), "message is not modified"
-  swallow, 429 backoff, 403→`wantsDms: false`, 4096 guard with a two-stage
-  fallback, last-seat concurrency via serializable mutations.
+### B1. Court cost per match → automatic margin 🔥🔥 · S · *[Owner, Investor]*
+Add `matches.courtCost` (optional). Then every match, every week, every month has
+a computed P&L: `revenue = paid seats × pricePerPerson`, `margin = revenue −
+courtCost`. One field unlocks the entire "is this community making or losing
+money" question that nothing currently answers.
 
-### 4.2 Violations
+### B2. Per-player balance / "who owes" 🔥🔥 · M · *[Owner, Admin, Player]*
+`paid` is per-membership but never aggregated. A player-level view — "unpaid
+games: 3, total owed: X" — surfaces chronic non-payers (today invisible unless an
+admin remembers). Two surfaces: admin sees everyone's balance; a player sees
+**their own** "мои неоплаченные игры" (a genuine reason for a player to open the
+dashboard). All derivable from existing `paid` + `pricePerPerson`.
 
-- **Strings rule (Golden Rule 4) is broken repo-wide** — still true, and
-  **deliberately not touched** in this pass. It's a much larger job than the
-  rest of this list (every board/DM string in the backend, every toast/
-  dialog/label across 11+ admin files) and it touches live bot-message
-  rendering — the highest-blast-radius surface in the app. Doing it "quickly"
-  alongside everything else risked a live-message regression with no easy
-  way to diff-test it. Left as a recommended follow-up with its own pass:
-  (1) move board/DM copy into `convex/lib/strings.ts` as interpolating
-  functions; (2) create `apps/admin/src/lib/strings.ts`; (3) add a proper
-  Russian plural helper while you're there.
-- **Board model drift** ✅ **doc fixed** — CLAUDE.md §4 now describes the
-  actually-shipped full inline rosters and the manual-repost mechanism
-  instead of the old collapsed-rosters/burial-counter plan.
-- **Tech-stack table stale** ✅ **doc fixed** — now describes Vite +
-  TanStack Router / better-auth cross-domain, notes `apps/web` is pending
-  retirement.
-- **Unindexed queries** — resolved by deleting the unused indexes and
-  rewording the CLAUDE.md §7 rule to explicitly allow bounded scans on small
-  tables (see §3.1) rather than pretending full enforcement.
+### B3. Pay-link deep integration 🔥🔥 · M · *[Owner, Player, Investor]*
+Manual card transfers are the local norm, but a prefilled **Payme/Click/Uzum**
+deep link (amount = `pricePerPerson`) on the match detail + reminder DM removes
+the "what's the card number again" ritual and measurably improves collection.
+Even without a payment *gateway*, a deep link is cheap. This is also the first
+step toward the investable version (transaction-fee business model, B-invest).
 
-### 4.3 Admin-app quality gaps (not rule violations, but inconsistencies)
+### B4. Payment nudges 🔥 · S · *[Owner, Admin]*
+A scheduled DM to unpaid roster players after a match ("не забудь оплатить игру
+X — реквизиты: …"). Reuses the reminder scheduler + `paymentInfo`. Turns
+collection from "admin chases in chat" into an automated sweep.
 
-- **Error handling is split-brain** ✅ **applied** — every previously-uncaught
-  mutation call site (`players.tsx`'s level edit/admin toggle/soft delete;
-  `matches.$matchId.tsx`'s publish/cancel/leave/remove/add-guest/add-existing)
-  now catches and toasts on failure.
-- **No pending/disabled state on non-form mutation buttons** — ✅ **applied**
-  to `AddGuestDialog` specifically (the one with a real double-fire bug: two
-  guest rows on a double-click). Left as-is elsewhere (publish, cancel,
-  remove, promote) — those mutations are naturally idempotent-ish or
-  guarded server-side, so the risk there is cosmetic (a toast fires twice),
-  not a data bug, and didn't seem worth the extra state plumbing on every
-  button for this pass.
-- **No error boundary anywhere** — a thrown Convex query error white-screens
-  the route.
-- **Copy-paste debt:** history card + skeleton duplicated between
-  `history.tsx:59-79` and `players_.$playerId.tsx:73-93`; the
-  "court · format · level · price" meta line repeated in four files; player
-  skeletons duplicated within `players.tsx`. Small shared components
-  (`<HistoryList>`, `<MatchMeta>`) would DRY it.
-- **`tashkent-time.ts` duplicated between apps** (admin's is a superset).
-  When `apps/web` retires this self-resolves; if both apps live longer,
-  promote it to a shared package.
-- **Cancel-dialog copy** claims cancellation "can only be undone manually
-  through the database" — true today (no restore UI), but soft-delete was
-  designed for recoverability. Either add an admin "restore" action someday
-  or keep the copy; just noting the tension.
+### B5. Pricing flexibility 💡 · M · *[Owner, Investor]*
+Member-vs-guest pricing, early-bird, or a punch-card ("10 игр за X") increases
+both revenue and commitment (prepaid players show up). Reserved — needs a pricing
+decision before building, but worth putting on the roadmap.
 
 ---
 
-## 5. Business analysis (CEO/CTO view)
+## C. Player experience — the retention basics
 
-### 5.1 The core loop, honestly assessed
+Most players only ever touch Telegram (the board + DMs), not the dashboard, so
+small frictions there compound. The dashboard is polished; the *player-facing*
+gaps are mostly in Telegram and in convenience features.
 
-What ships today is the right product: one-tap join from the group, a live
-board as shared truth, opt-in reminders with self-serve drop, and an admin
-dashboard that covers the full management surface. For a 100–200-person
-community running 3–7 matches a week, the loop that fills a match works.
+### C1. Frictionless reminder opt-in 🔥🔥 · S · *[Player]*
+Reminders require the player to have DM'd `/start` (`wantsDms`). A player who
+never did gets **no reminders** and never learns why. Add a one-tap "🔔 Напоминать
+мне" button on each match message / board that opts them in on the spot, and a
+gentle "хочешь напоминания? нажми Start" line the first time someone joins
+without `wantsDms`. This is the cheapest retention win available.
 
-The loop that **re-fills** a match leaks. Seats free up three ways — self-drop
-(waitlist notified ✅), admin removal (silently, bug 2.3 ❌), and cancellation
-(match gone, N/A) — and refilling depends on an admin noticing and manually
-promoting. Every hour a freed seat sits invisible is fill-rate and revenue
-(court costs are fixed; `pricePerPerson` × empty seat is money someone eats).
-This is the highest-leverage product problem in the codebase.
+### C2. "Add to calendar" (.ics / Google) 🔥🔥 · S · *[Player]*
+No calendar export anywhere. An "В календарь" link (per match) that yields an
+`.ics` or a Google Calendar URL is a high-value convenience that makes the game a
+real commitment. Purely a display-edge feature — you already have `startsAt`,
+`durationMin`, `court`.
 
-**Recommended waitlist model (v2 direction): auto-offer with confirmation.**
-Seat frees → first waitlisted player gets a DM «Место освободилось —
-забрать?» with a claim button and a time window (suggest 30–60 min, shorter
-inside T-3h) → unclaimed offers fall through to the next person → exhausted
-waitlist falls back to the current behavior (board notification + admin).
-This keeps admin curation as the override rather than the bottleneck, fills
-seats at chat speed, and builds on plumbing that already exists
-(`extraSeatsOpened`, DM buttons, membership roles). It needs one new concept
-(a pending offer with an expiry job) — the same scheduler pattern as
-reminders. Prerequisite: fix 2.3 first so *every* freed roster seat emits the
-same event; the offer machine then subscribes to that one event.
+### C3. Court location / map link 🔥 · S · *[Player]*
+`court` is free text — a new player often doesn't know *where* that is. Add an
+optional map/address per court (or a `location` field per match). Removes a real
+"куда идти?" friction and reduces no-shows-by-confusion.
 
-### 5.2 Must-have features (confirmed priorities)
+### C4. Self-serve guest bringing 💡 · M · *[Player, Owner]*
+Today only admins add guests (`addGuestToMatch`). Players routinely want to bring
+a friend. A "+1 гость" self-serve flow (capacity-aware, guest counts against the
+roster) is a frequent real-world need and drives attendance. Reserved in CLAUDE.md
+v2 (cascade rules need a decision) — but it's a strong player-pull feature.
 
-**Payment tracking** — the biggest admin pain at this cadence. Everything
-needed already exists except one field: add `paidAt?: number` (or
-`paymentStatus`) on `memberships`, a toggle in the roster table on the match
-detail page, and a "кто не оплатил" line in the DM/summary. Deliberately
-small v1: no amounts (it's `pricePerPerson`), no payment provider, no
-receipts — just replace the "scroll the chat to see who said перевёл" ritual.
-Est. scope: one schema field, one mutation, one column, one string.
-
-**Board summary auto-text** — near-free win. The renderer
-(`lib/board.ts:renderBoard`) already composes exactly the data the
-hand-typed «Напоминание, завтра…» message contains. Ship it as a per-match
-"Сформировать текст" button in the dashboard that produces copy-pasteable
-text (admin still posts it manually — keeps the human touch and avoids new
-bot-permission surface). Est. scope: one pure function + one button.
-
-**Next tier (explicitly not now):** weekly templates (real time-saver, but
-match creation is already a 30-second form — do it when creation frequency
-annoys), attendance/no-show (valuable once waitlist auto-offers exist, since
-reliability should influence offer order), verified levels. **Recommend
-against for now:** Telegram Mini App player view and multi-chat/topics — both
-are architecture-scale efforts that serve growth you don't have yet.
-
-### 5.3 Edge cases through a business lens
-
-- **Short-notice matches** are routine, and today each one poisons the alert
-  channel (bug 2.1). Fixing it is an ops necessity, not a nicety.
-- **The 4096-char ceiling is real at your scale, not theoretical.** 7 open
-  matches × (header + ~5 meta lines + 11-name inline roster + waitlist) will
-  brush the limit; the fallback strips mention links, then hard-truncates
-  mid-board with an `…` — meaning the *last matches silently disappear from
-  the board* while their buttons remain. Worth a deliberate decision before
-  it happens organically: either cap concurrent open matches, collapse
-  rosters past N names («…и ещё 4»), or accept truncation. The current
-  behavior (truncate + `console.error`) is the worst of the three because
-  nobody in the group knows it happened.
-- **Reminder fan-out:** ~150 opted-in members × sequential DMs ≈ fine
-  (Telegram allows ~30 msg/s; a full sweep is seconds). The deferred queue
-  from TODO M2 can stay deferred.
-- **Admin fat-fingers:** last-admin lockout (2.8) and self-soft-delete are
-  one-tap disasters with dashboard-only recovery. Cheap guards, high regret
-  avoided.
-- **Guests vs capacity:** `addGuestToMatch` respects capacity and guests are
-  proper player rows (Golden Rule 6 upheld) — the future merge story is
-  intact.
-
-### 5.4 Multi-community flags (decision list, no action now)
-
-If "maybe other communities later" becomes real, these are the current
-single-tenant assumptions to unwind — none need fixing today, but avoid
-deepening them:
-
-1. `TELEGRAM_CHAT_ID` as a single env var baked into board/notify/reminder
-   paths (the biggest one; `boardState` is already keyed by `chatId`, which
-   helps).
-2. Global `isAdmin` — no notion of which community a player administers.
-3. One bot token = one bot identity for all communities.
-4. Seed-admin bootstrap via a single env var.
-5. Centralized strings module (§4.2) is the localization prerequisite —
-   another reason the enforcement pass is worth it.
-6. `webLogin` / auth flow is already tenant-agnostic — good.
+### C5. Uzbek / multi-language 💡 · L · *[Player, Investor]*
+Russian-only. Part of the community likely prefers Uzbek. This is **blocked** on
+centralizing the admin app's strings (see D6) — the bot copy is already in
+`lib/strings.ts`, but `apps/admin` has Russian inline everywhere. Do the string
+extraction first; language becomes a config swap after.
 
 ---
 
-## 6. Recommended CLAUDE.md / TODO.md edits (not applied)
+## D. Admin efficiency — respect the organizer's time
 
-### 6.1 CLAUDE.md ✅ applied (items 1-4; item 5 still pending on 2.8)
+The admin is the bus factor for the whole community. Anything that saves them
+minutes per match, or removes a "did I remember to…" worry, is high-value.
 
-1. **Tech stack table:** replace the "TanStack Start" row with: admin
-   dashboard = Vite + TanStack Router SPA (`apps/admin`), client-only,
-   better-auth cross-domain sessions direct to Convex; note `apps/web`
-   (TanStack Start) is deployed but pending retirement.
-2. **§4 board model:** two changes. (a) Replace "Full rosters are collapsed"
-   with the actual shipped decision — full inline rosters with the two-stage
-   4096 fallback (strip links → truncate) — and record whatever call you make
-   on the truncation behavior (§5.3). (b) Replace the burial-counter
-   paragraph ("a burial counter triggers delete-and-repost") with the descoped
-   mechanism: **manual repost via the dashboard's «Отправить в группу»
-   button** (`boardState.repostToGroup`). Remove the "when chatter buries the
-   board…" bullet from the locked decisions.
-3. **§5 data model:** drop `messagesSincePost`/`lastPostedAt` from the
-   `boardState` description once the schema fields are removed; fix the
-   `durationMin` comment (it does not drive reminders); drop
-   `reminderLeadMin` if the field is removed.
-4. **§7 Convex conventions:** either enforce "every filtered query uses an
-   index" (fix `listAll` / `distinctFieldValues`) or amend the rule to permit
-   bounded `.take(N)` scans on small tables — the doc and the code should
-   agree either way.
-5. **Golden rules:** consider adding the last-admin invariant ("the system
-   must always have ≥1 live admin; mutations enforce it") once 2.8 is fixed.
+### D1. Match templates / duplicate 🔥🔥 · S · *[Admin]*
+At 3–7 matches/week the same slots repeat (same court, format, level, price,
+time-of-day). "Дублировать игру" / "Повторить прошлую неделю" pre-fills the
+create form. Cheapest big time-saver. A full **weekly recurring template** (v2)
+is the next step, but one-click duplicate delivers 80% of the value now.
 
-### 6.2 TODO.md ✅ applied
+### D2. Board summary auto-text 🔥 · S · *[Admin]*
+The prior audit flagged this and it's still unbuilt: a per-match "Сформировать
+текст" button that outputs copy-pasteable Russian summary text (the
+`renderMatchMessage` data already composes it). Admin still posts manually — keeps
+the human touch, adds zero bot-permission surface. Near-free.
 
-1. **Milestone 6 → descoped, not blocked.** Rewrite as: automatic burial
-   repost permanently descoped in favor of the manual «Отправить в группу»
-   repost (shipped); delete the schema fields; group-privacy-mode toggle no
-   longer needed. Keep a one-line pointer in the v2 backlog in case scale
-   changes the calculus.
-2. **Milestone 8 → reflect reality.** The admin app's feature surface is
-   done (list/detail/CRUD/roster/waitlist/guests/players/history/repost).
-   Remaining checklist: deploy `apps/admin` to Vercel + link project; strings
-   module (§4.2); error/pending-state polish (§4.3); decide the fate of the
-   untracked chart components; then retire `apps/web` (checklist in §6.3).
-3. **Milestone 9 (hardening) → add the bug list.** Items 2.1–2.8 belong here
-   verbatim; 2.1 and 2.2 specifically before any prod cutover.
-4. **Promote from v2 backlog:** payment tracking and board summary auto-text
-   as a "v1.5" section (scopes in §5.2); annotate the guest-bringing /
-   attendance items as sequenced *after* the waitlist auto-offer decision.
-5. **Record the waitlist direction:** add the auto-offer-with-confirmation
-   model (§5.1) to the v2 backlog as the chosen direction, so the next
-   session doesn't re-litigate it.
+### D3. Restore a cancelled match 🔥 · S · *[Admin]*
+Cancellation is a soft delete (`isDeleted: true`), designed to be recoverable —
+but there's **no restore UI**, and the cancel dialog even tells the admin it "can
+only be undone through the database." Add an admin "Восстановить" action (and a
+"Отменённые" filter). Honors the soft-delete design that already exists.
 
-### 6.3 `apps/web` retirement checklist (when you're ready — not now)
+### D4. No-show reputation 🔥 · M · *[Admin, Owner]*
+`noShow` is tracked manually per membership and shown on the profile, but it's
+inert — it influences nothing. Surface a per-player no-show rate, and (once A1
+ships) let it order waitlist offers. Reliability becomes visible and mildly
+self-correcting.
 
-1. ✅ **Done** — `apps/admin` is deployed to Vercel (`j-schedule-admin-new`
-   project; production and preview environments configured separately,
-   preview against dev Convex, production against prod Convex).
-2. ✅ **Done** — env vars set on both environments; `EXTRA_TRUSTED_ORIGINS`
-   includes the admin domain on both the dev and prod Convex deployments.
-3. Partially verified through real usage during this work (match detail,
-   roster views, login) — hasn't been walked as a deliberate end-to-end
-   checklist. Worth doing once before actually retiring `apps/web`.
-4. Delete `apps/web`, `packages/ui/src/components/dropdown-menu.tsx`, root
-   `.vercel` link to project "web" — **not done**, per your "keep both for
-   now" decision.
-5. Update CLAUDE.md tech stack — ✅ done as part of §6.1 above (already
-   reflects the admin app regardless of whether `apps/web` retires).
-6. Deferred dep cleanup (catalog re-alignment) — not done, low priority,
-   noted in §3.3.
+### D5. Last-admin & self-destruct guards 🔥 · S · *[Admin]*
+`setIsAdmin` / `softDeletePlayer` let an admin demote or delete the last admin (or
+themselves) — a one-tap lockout with dashboard-only recovery. This was *declined*
+in the last audit; re-flagging because it's a cheap guard against a
+high-regret mistake. Count remaining live admins; refuse the write that would hit
+zero.
+
+### D6. Centralize admin strings 🔥 · M · *[Admin, Investor]*
+`apps/admin` has no strings module — Russian copy is inline across ~15 files
+(CLAUDE.md §7 calls this out). It's the prerequisite for C5 (i18n) *and* for
+consistent copy/tone. Non-trivial but unblocks the multilingual/multi-community
+story. Create `apps/admin/src/lib/strings.ts`; add a proper Russian plural helper
+while you're in there (the heatmap already has a `1 ? "игра" : "игры"` bug that
+mishandles 5+).
+
+### D7. Broadcast / announce from the dashboard 💡 · M · *[Admin]*
+No way to push a one-off announcement ("корт изменился, смотрите закреплённое") to
+the group or to a match's roster from the dashboard. Reuses the DM/notify layer.
+Useful, but weigh against bot-permission and spam risk — make it deliberate.
 
 ---
 
-## Appendix: verification notes
+## E. Business intelligence — make the data earn its keep
 
-Bug claims 2.1–2.8, the inline-roster drift, the negative-`spotsLeft` path,
-and the missing guards were re-verified against source at head `a673011`
-before writing this report (files: `matches.ts`, `memberships.ts`,
-`matchReminders.ts`, `players.ts`, `webLogin.ts`, `telegram/webhook.ts`,
-`lib/board.ts`). Line numbers reference that commit and will drift.
+The heatmap + trend charts (dashboard, admin-only) are a start, but they're
+activity charts, not **business** metrics. The data to answer every owner/investor
+question already exists in `matches` + `memberships` + `paid`/`noShow` — it's just
+never aggregated into a health view.
+
+### E1. "Community health" dashboard 🔥🔥 · M · *[Owner, Investor]*
+One screen: weekly **fill rate**, **revenue & margin** (needs B1), **active
+players** (week-over-week), **retention** (returning vs new), **no-show rate**,
+**court utilization**. This is the single artifact that turns "a nice tool" into
+"a business I can reason about" — and it's the first thing an investor asks to
+see. Mostly read-side derivations over existing tables.
+
+### E2. Player leaderboards / engagement 🔥 · S · *[Owner, Player]*
+"Most games this month", "most reliable" (low no-show), streaks. Doubles as a
+retention mechanic (players like seeing themselves ranked) and gives the marketing
+site real, live social proof. The public profile + `matchStartsAt` history makes
+this cheap.
+
+### E3. Instrument the funnel 🔥 · S · *[Investor]*
+Nothing currently counts: joins, drops, board-tap→join conversion, reminder→show
+rate, dashboard logins. Even lightweight event counting now gives you the metrics
+a fundraise or a "should I keep doing this" decision needs later. Cheap to add,
+impossible to backfill.
+
+---
+
+## F. Redeployability — make a new community a config change, not a code hunt
+
+Since growth = **fork and redeploy a fresh single-tenant instance**, the whole
+"productization" question collapses into one practical thing: *how many files does
+someone edit to stand up community B?* Right now the answer is a mix — secrets and
+IDs are clean env config, but brand, group link, timezone, and language are
+hardcoded, so a redeploy is a search-and-replace hunt with at least one silent
+functional bug. Fixing this is the single most valuable "growth" investment,
+because it turns every future community from a code project into a config file.
+
+### F1. Extract community config into one place 🔥🔥 · M · *[Owner, Investor]*
+Today's split, verified in code:
+
+**Already clean (env-driven — keep as-is):** `TELEGRAM_BOT_TOKEN`,
+`TELEGRAM_SECRET_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_TOPIC_ID`,
+`SEED_ADMIN_TELEGRAM_ID`, `VITE_CONVEX_URL`, `VITE_CONVEX_SITE_URL`,
+`VITE_TELEGRAM_BOT_USERNAME`.
+
+**Hardcoded — a per-community edit (the friction to remove):**
+
+| What | Where | Why it bites on redeploy |
+|------|-------|--------------------------|
+| **Group link `https://t.me/one_padel`** | `convex/lib/strings.ts:45` (`joinMatchesInGroup`) | **Functional bug** — community B's bot tells users to join *this* community's group. Highest priority. |
+| **Timezone Tashkent / UTC+5** | `convex/lib/time.ts` (`TASHKENT_TZ`, `TASHKENT_OFFSET_MS`) + duplicated `apps/admin/src/lib/tashkent-time.ts` | Any non-Tashkent community shows **wrong times everywhere** — board, DMs, reminders, dashboard. Baked into function names too. |
+| **Brand "One Padel"** | 2× in `apps/admin` (`app-sidebar.tsx:27`, `p.$playerId.tsx:28`); ~23× in `apps/web` | Cosmetic in the app; the marketing site is a near-total rewrite regardless (see F3). |
+| **Language (Russian)** | bot copy in `lib/strings.ts`; admin copy **inline** across ~15 files | A different-language community can't be served without the string extraction (D6). |
+
+**The move:** one `community.config.ts` (or a small set of env vars) holding
+`{ communityName, groupUrl, timezone, locale }`, consumed by the backend strings,
+`time.ts`, and both frontends. Combined with D6 (admin string extraction), a new
+community becomes: set env vars, edit one config file, replace the marketing
+content. That's the whole "productization" story for this model — and it's an
+M, not the L that multi-tenancy would have been.
+
+### F2. Timezone-parameterize the time layer 🔥 · S · *[Owner]*
+Subset of F1 worth calling out on its own because it's the highest-correctness
+item: `toTashkent` / `fromTashkent` / `tashkentDayIndex` assume a fixed +5 offset.
+Generalize to an injected IANA zone (`Intl.DateTimeFormat` already takes `timeZone`
+— the code uses `"Asia/Tashkent"` as a literal, so this is mostly a rename +
+parameter). Do this even if you never leave Tashkent; it removes a whole class of
+"wrong time" landmines from any future fork.
+
+### F3. Marketing-site → funnel (and fork-friendly) 🔥 · S · *[Owner, Investor]*
+`apps/web` (home/about/community/tournaments) already previews live upcoming
+matches via `listPublicUpcoming` — a good hook. Two asks: (a) make the CTA lead
+*into* the loop — prominent "join the community" → Telegram group + bot deep link,
+plus E2 leaderboards / live fill stats as social proof (it informs today; it
+should **convert**); (b) since it's ~23 hardcoded brand strings + bespoke copy +
+club photos, treat it as the **one part that's genuinely rebuilt per community** —
+so keep its content in as few files as possible to make that rebuild fast.
+
+### F4. Reduce bus factor 🔥 · — · *[Owner]*
+The whole operation depends on one admin's diligence (manual payments, promotions,
+no-show flags). Every automation above (A1, B4, D1) also *de-risks the person* —
+each one makes the community survivable if the founder-admin steps back for a week.
+Especially relevant in a fork-per-community world where *you* may be the admin (or
+the setup partner) for several instances at once.
+
+---
+
+## G. UI/UX polish — mostly small, the base is strong
+
+The admin app is genuinely well-built (concentric radii, staggered transitions,
+reduced-motion handling, responsive drawers/sheets — reviewed separately). The
+per-match board architecture also retired the old 4096-char truncation risk.
+Remaining items are small:
+
+- **First-run / empty states** 🔥 · S — a brand-new admin (fresh community) lands
+  on empty lists with no "create your first match" guidance beyond the matches
+  page. A short onboarding checklist would help. *[Admin]*
+- **No error boundary** 🔥 · S — a thrown Convex query error white-screens the
+  route (flagged before, still open). One boundary at the authenticated layout.
+  *[Player, Admin]*
+- **Copy-paste debt** · S — history card + skeleton duplicated between `history.tsx`
+  and `players_.$playerId.tsx`; the "court · format · level · price" meta line
+  repeats in 4 files. Extract `<HistoryList>` / `<MatchMeta>`. *[maintainability]*
+- **Default Vite favicon / no app icon** · S — `index.html` still ships
+  `/vite.svg`. A real One Padel icon is a 10-minute brand win. *[Owner]*
+- **Cancel-dialog copy** · S — now inaccurate once D3 (restore) ships; update the
+  "only through the database" wording. *[Admin]*
+
+---
+
+## H. Reliability & trust — protect the layer people rely on
+
+The heavy bugs from the last pass are fixed. These are product-level trust items:
+
+- **Payment/attendance data quality** *[Owner]* — both are manual; the numbers are
+  only as good as admin diligence. B4 (nudges) and D4 (surfacing) partly
+  self-correct this.
+- **Reminder trust** *[Player]* — the reminder layer is the one thing people
+  passively depend on; a single wrong-time or missed reminder erodes it. The
+  dead-man's-switch is in place — consider a visible "reminders healthy" indicator
+  on the admin dashboard so the admin *sees* it working, not just gets alerted when
+  it breaks.
+- **Board sync fan-out** *[scale]* — every join/drop schedules its own
+  `syncMatchMessage`; fine now, a debounce is the eventual fix if a popular match
+  gets tapped rapidly.
+
+---
+
+## Suggested sequencing
+
+Not a mandate — a sequence that front-loads leverage and lets later work reuse
+earlier plumbing:
+
+1. **v1.5 (revenue & time, all S/M):** A1 waitlist auto-offer · B1 court cost ·
+   D1 duplicate-match · D2 board summary · C1 reminder opt-in · C2 add-to-calendar.
+   *These pay for themselves in filled seats and admin minutes.*
+2. **v1.6 (make the data earn):** B2 balances · B4 payment nudges · E1 health
+   dashboard · D4 no-show reputation · E3 funnel instrumentation.
+3. **v2 (fork-readiness & reach):** F2 timezone-parameterize · F1 community config
+   → D6 admin strings → C5 i18n · B3 pay links · C4 self-serve guests. *Do F1/F2
+   before the second community exists — they're cheap now and painful to retrofit
+   across live deployments later.*
+
+## Open decisions (yours to make before the linked work starts)
+
+- **Waitlist offer window** — how long does a claim stay open, and does it shorten
+  inside T-3h? (blocks A1)
+- **Deployment model** — ✅ *resolved: single-tenant, fork-and-redeploy per
+  community.* This makes F1/F2 (config extraction, timezone) the "growth" work
+  instead of multi-tenancy, and confirms the current single-tenant assumptions are
+  correct. Next sub-decision: config file vs. more env vars for
+  `communityName / groupUrl / timezone / locale`?
+- **Business model** — with fork-and-redeploy, this is a **deploy-per-community
+  service** (you set up + optionally run each instance), not a scalable SaaS.
+  Decide whether that's a one-off setup fee, an ongoing "I run it for you"
+  retainer, or purely your own communities. Shapes how much F1 polish is worth.
+- **Pricing model (per match)** — flat, or member/guest/early-bird? (blocks B5)

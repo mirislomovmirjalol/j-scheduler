@@ -2,11 +2,14 @@ import { api } from "@J-schedule/backend/convex/_generated/api"
 import { Badge } from "@J-schedule/ui/components/badge"
 import { Button } from "@J-schedule/ui/components/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@J-schedule/ui/components/card"
+import { Checkbox } from "@J-schedule/ui/components/checkbox"
 import { Empty, EmptyDescription, EmptyTitle } from "@J-schedule/ui/components/empty"
+import { Label } from "@J-schedule/ui/components/label"
 import { Skeleton } from "@J-schedule/ui/components/skeleton"
 import { Tabs, TabsIndicator, TabsList, TabsTab } from "@J-schedule/ui/components/tabs"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react"
+import { ConvexError } from "convex/values"
 import { useState } from "react"
 import { toast } from "sonner"
 
@@ -34,7 +37,19 @@ function playerName(player: { firstName: string; lastName?: string } | null) {
 
 function MatchesList() {
   const player = useQuery(api.players.getCurrentPlayer)
+  // Captured once (stable for this component's lifetime), not read fresh on
+  // every render — the "Активные"/"Прошедшие" queries below use it as a
+  // paginated index bound, and Date.now() ticking forward between page
+  // fetches would shift that bound and invalidate the pagination cursor.
+  const [now] = useState(() => Date.now())
+  // Bounded — backs only the stat-card block below and the dashboard's
+  // preview list, never rendered as the "Активные" tab's own list.
   const upcomingMatches = useQuery(api.matches.listUpcomingForPlayer)
+  const {
+    results: activeMatches,
+    status: activeStatus,
+    loadMore: loadMoreActive,
+  } = usePaginatedQuery(api.matches.listUpcomingForPlayerPage, { now }, { initialNumItems: 20 })
   const {
     results: allMatches,
     status: allStatus,
@@ -44,18 +59,18 @@ function MatchesList() {
     results: pastMatches,
     status: pastStatus,
     loadMore: loadMorePast,
-  } = usePaginatedQuery(api.matches.listPastForPlayerPage, {}, { initialNumItems: 20 })
-  const repostToGroup = useMutation(api.boardState.repostToGroup)
+  } = usePaginatedQuery(api.matches.listPastForPlayerPage, { now }, { initialNumItems: 20 })
+  const repostAllToGroup = useMutation(api.matches.repostAllToGroup)
   const [reposting, setReposting] = useState(false)
+  const [pinOnRepost, setPinOnRepost] = useState(false)
   const search = Route.useSearch()
   const navigate = Route.useNavigate()
 
   const view: MatchesView = search.view ?? "active"
-  const matches = view === "all" ? allMatches : view === "past" ? pastMatches : upcomingMatches
-  const paginatedStatus = view === "all" ? allStatus : view === "past" ? pastStatus : null
-  const loadMore = view === "all" ? loadMoreAll : loadMorePast
-  const isLoadingFirstPage =
-    paginatedStatus !== null ? paginatedStatus === "LoadingFirstPage" : matches === undefined
+  const matches = view === "all" ? allMatches : view === "past" ? pastMatches : activeMatches
+  const paginatedStatus = view === "all" ? allStatus : view === "past" ? pastStatus : activeStatus
+  const loadMore = view === "all" ? loadMoreAll : view === "past" ? loadMorePast : loadMoreActive
+  const isLoadingFirstPage = paginatedStatus === "LoadingFirstPage"
 
   const filtered = matches ? applyMatchesFilters(matches, search, player?._id) : undefined
 
@@ -64,7 +79,15 @@ function MatchesList() {
       <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Матчи</h1>
         {player?.isAdmin && (
-          <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+          <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
+            <Label htmlFor="pin-on-repost-all" className="normal-case">
+              <Checkbox
+                id="pin-on-repost-all"
+                checked={pinOnRepost}
+                onCheckedChange={(checked) => setPinOnRepost(checked === true)}
+              />
+              Закрепить
+            </Label>
             <Button
               variant="outline"
               disabled={reposting}
@@ -72,16 +95,20 @@ function MatchesList() {
               onClick={async () => {
                 setReposting(true)
                 try {
-                  await repostToGroup({})
-                  toast.success("Доска отправлена в группу")
-                } catch {
-                  toast.error("Не получилось отправить доску")
+                  await repostAllToGroup({ pin: pinOnRepost })
+                  toast.success("Игры отправлены в группу")
+                } catch (err) {
+                  toast.error(
+                    err instanceof ConvexError
+                      ? (err.data as string)
+                      : "Не получилось отправить игры",
+                  )
                 } finally {
                   setReposting(false)
                 }
               }}
             >
-              <TextSwap>{reposting ? "Отправляем…" : "Отправить в группу"}</TextSwap>
+              <TextSwap>{reposting ? "Отправляем…" : "Отправить все игры"}</TextSwap>
             </Button>
             <Button render={<Link to="/matches/new" />} className="flex-1 sm:flex-none">
               + Новая игра
@@ -262,7 +289,7 @@ function MatchesList() {
                 </Link>
               ))}
 
-              {paginatedStatus !== null && paginatedStatus !== "Exhausted" && (
+              {paginatedStatus !== "Exhausted" && (
                 <Button
                   variant="outline"
                   disabled={paginatedStatus === "LoadingMore"}

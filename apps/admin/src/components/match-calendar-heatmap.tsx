@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import { createPortal } from "react-dom"
 
+import { pluralizeRu } from "@/lib/format"
 import { tashkentDayIndex, tashkentDayIndexToDate } from "@/lib/tashkent-time"
 import { usePresence } from "@/lib/use-presence"
 
@@ -163,7 +164,7 @@ export default function MatchCalendarHeatmap({
                         timeZone: "UTC",
                       })}${
                         matchCount > 0
-                          ? ` · ${matchCount} ${matchCount === 1 ? "игра" : "игры"} · ${attendees} чел.`
+                          ? ` · ${matchCount} ${pluralizeRu(matchCount, ["игра", "игры", "игр"])} · ${attendees} чел.`
                           : " · нет игр"
                       }`
                   return (

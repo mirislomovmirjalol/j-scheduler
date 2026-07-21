@@ -156,21 +156,47 @@ export default defineSchema({
     .index("by_player_and_matchStartsAt", ["playerId", "matchStartsAt"]),
 
   // ─────────────────────────────────────────────────────────────────────────
-  // BOARD STATE — the single live "board" message per chat.
-  // Lets us edit-in-place; repost-to-bottom is a manual admin action
-  // (boardState.repostToGroup) rather than an automatic burial counter.
-  // One row per Telegram chat (you have one flat chat "игры" for now).
+  // MATCH BOARD MESSAGES — one live Telegram message PER MATCH (not one
+  // combined board). Lets us edit each match's message in place; repost is a
+  // manual admin action (matches.repostMatchToGroup / repostAllToGroup) or
+  // the automatic force-repost on publish. `pinned` tracks whether this
+  // match's message is currently pinned so the "unpin started matches" cron
+  // knows what to clean up once a match's startsAt has passed. Rows are only
+  // removed when a match is cancelled (see telegram/matchBoard.ts) — a match
+  // that simply starts/finishes keeps its row forever, so this table grows
+  // without bound over a community's lifetime. `by_pinned` exists so
+  // "which match is currently pinned" (normally 0-1 rows) stays a cheap
+  // indexed lookup instead of an unbounded scan as the table grows past any
+  // fixed take() bound.
   // ─────────────────────────────────────────────────────────────────────────
-  boardState: defineTable({
+  matchBoardMessages: defineTable({
+    matchId: v.id("matches"),
     chatId: v.number(),
-    messageId: v.union(v.number(), v.null()), // current board message, if any
-    // Deprecated — the automatic burial-repost feature these backed was
-    // descoped in favor of the manual repost above. No longer written;
-    // optional (not removed) only because the existing row still has them
-    // set and Convex validates stored documents against the schema.
-    messagesSincePost: v.optional(v.number()),
-    lastPostedAt: v.optional(v.number()),
-  }).index("by_chatId", ["chatId"]),
+    messageId: v.number(),
+    pinned: v.boolean(),
+  })
+    .index("by_match", ["matchId"])
+    .index("by_pinned", ["pinned"]),
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // BOARD REPOST LOCK — single row guarding every FORCE repost
+  // (matches.publishMatch, repostMatchToGroup, repostAllToGroup) so only one
+  // ever touches the group's messages at a time — that's what actually
+  // prevents two overlapping delete-then-repost calls for the same match
+  // from racing into duplicate messages, not just the bulk path. `startedAt`
+  // lets a crashed/never-released lock be ignored after a timeout rather
+  // than wedging every repost button forever. `lastSentAt` additionally
+  // paces every force-repost's `sendMessage` call (not just the bulk loop's
+  // own iterations) at least GROUP_MESSAGE_PACING_MS apart, to stay under
+  // Telegram's ~20-messages/minute-per-group limit regardless of whether the
+  // sends came from one bulk run or several individual publishes/reposts in
+  // quick succession (see telegram/matchBoard.ts).
+  // ─────────────────────────────────────────────────────────────────────────
+  boardRepostLock: defineTable({
+    inProgress: v.boolean(),
+    startedAt: v.number(),
+    lastSentAt: v.optional(v.number()),
+  }),
 
   // ─────────────────────────────────────────────────────────────────────────
   // SCHEDULED REMINDERS — track Convex scheduler job ids per match so a

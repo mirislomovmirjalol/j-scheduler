@@ -9,6 +9,7 @@ import {
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
+import { acquireBoardRepostLock } from "./matchBoardMessages";
 import { requireAdminPlayer, requireAuthedPlayer } from "./players";
 
 const REMINDER_LEADS = [
@@ -121,12 +122,26 @@ export const publishMatch = mutation({
     if (existing.isPublished) return;
 
     await ctx.db.patch("matches", matchId, { isPublished: true });
-    // force: true — a silent in-place edit would update the existing board
-    // message with no Telegram notification, so a newly published match
-    // (the moment it actually becomes joinable) would go unnoticed by the
-    // group. Same reasoning as the manual "Отправить в группу" repost.
-    await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {
+    // force: true — a silent in-place edit would update an existing message
+    // with no Telegram notification, so a newly published match (the moment
+    // it actually becomes joinable) would go unnoticed by the group. Same
+    // reasoning as the manual "Отправить в группу" repost. pin: false —
+    // pinning is a deliberate, manual admin action (the "Закрепить"
+    // checkbox on repost), not something that fires automatically on every
+    // publish. Auto-pinning every published match was both a notification-
+    // spam risk (a pin event, unlike a plain message, always fires with
+    // sound) and a real rate-limit risk — Telegram throttles pin/unpin
+    // actions much more aggressively than regular messages.
+    // acquireBoardRepostLock + releaseLock: true — this is a force repost
+    // (posts a brand-new message), so it's subject to the same duplicate-
+    // message race as repostMatchToGroup/repostAllToGroup if it overlaps
+    // with either of those; the action releases the lock itself when done.
+    await acquireBoardRepostLock(ctx);
+    await ctx.scheduler.runAfter(0, internal.telegram.matchBoard.syncMatchMessage, {
+      matchId,
       force: true,
+      pin: false,
+      releaseLock: true,
     });
   },
 });
@@ -169,7 +184,7 @@ export const editMatch = mutation({
           .withIndex("by_match_and_role", (q) =>
             q.eq("matchId", matchId).eq("role", "roster"),
           )
-          .collect()
+          .take(200)
       ).filter((m) => !m.isDeleted).length;
 
       if (patch.maxMembers < rosterCount) {
@@ -241,7 +256,50 @@ export const editMatch = mutation({
       );
     }
 
-    await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
+    await ctx.scheduler.runAfter(0, internal.telegram.matchBoard.syncMatchMessage, {
+      matchId,
+    });
+  },
+});
+
+// Admin manual action: force a fresh repost of one match's message (delete +
+// resend at the bottom) rather than a silent in-place edit — Telegram
+// doesn't notify group members on edited messages, only new ones. `pin`
+// lets the admin opt out of pinning on a given repost (it used to always
+// pin unconditionally). acquireBoardRepostLock so this can't race a
+// concurrent bulk repost (or another click of this same button) into a
+// duplicate message for this match — see telegram/matchBoard.ts.
+export const repostMatchToGroup = mutation({
+  args: { matchId: v.id("matches"), pin: v.boolean() },
+  handler: async (ctx, { matchId, pin }) => {
+    await requireAdminPlayer(ctx);
+    await acquireBoardRepostLock(ctx);
+    await ctx.scheduler.runAfter(0, internal.telegram.matchBoard.syncMatchMessage, {
+      matchId,
+      force: true,
+      pin,
+      releaseLock: true,
+    });
+  },
+});
+
+// Bulk sibling of repostMatchToGroup — force-reposts every currently open
+// match. Backs the matches-list page's "repost everything" button and also
+// serves as the one-time backfill for matches that already existed under
+// the old single-combined-board model. Delegates to the SEQUENTIAL, PACED
+// repostAllMatches action rather than scheduling one syncMatchMessage call
+// per match here — those ran concurrently and raced on which one ended up
+// pinned (see repostAllMatches's comment). acquireBoardRepostLock refuses a
+// second bulk repost while one's still running — that background job is
+// deliberately paced to stay under Telegram's per-group rate limit, so it
+// can take tens of seconds for a large batch, long enough that clicking the
+// button again used to fire an overlapping run and produce duplicates.
+export const repostAllToGroup = mutation({
+  args: { pin: v.boolean() },
+  handler: async (ctx, { pin }) => {
+    await requireAdminPlayer(ctx);
+    await acquireBoardRepostLock(ctx);
+    await ctx.scheduler.runAfter(0, internal.telegram.matchBoard.repostAllMatches, { pin });
   },
 });
 
@@ -270,18 +328,58 @@ export const cancelMatch = mutation({
     await ctx.scheduler.runAfter(0, internal.telegram.notify.matchCancelled, {
       matchId,
     });
-    await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
+    // syncMatchMessage sees the match is now deleted and deletes its
+    // Telegram message (rather than editing it to say "cancelled") — same
+    // "disappears from the board" behavior as before, per-match now.
+    await ctx.scheduler.runAfter(0, internal.telegram.matchBoard.syncMatchMessage, {
+      matchId,
+    });
   },
 });
 
-// Open = not deleted and not yet started. Board sorts soonest-first. Also
-// resolves roster/waitlist first names for the board — full names shown
-// inline (per explicit user decision, revisiting CLAUDE.md's original
-// "collapsed rosters" call — see TODO.md's board model note). The 4096-char
-// guard in lib/board.ts's renderBoard is the safety net if this ever gets
-// too long for one message; we deliberately don't split into multiple
-// board messages (that reintroduces the burial problem the collapsed
-// design existed to avoid).
+async function namesForRole(
+  ctx: QueryCtx,
+  matchId: Id<"matches">,
+  role: "roster" | "waitlist",
+) {
+  const memberships = await ctx.db
+    .query("memberships")
+    .withIndex("by_match_and_role", (q) => q.eq("matchId", matchId).eq("role", role))
+    .take(200);
+
+  const players = await Promise.all(
+    memberships.filter((m) => !m.isDeleted).map((m) => ctx.db.get("players", m.playerId)),
+  );
+
+  return players
+    .filter((p): p is NonNullable<typeof p> => p !== null)
+    .map((p) => ({ name: p.firstName, telegramUserId: p.telegramUserId }));
+}
+
+async function withRosterCounts(ctx: QueryCtx, match: Doc<"matches">) {
+  const [rosterNames, waitlistNames] = await Promise.all([
+    namesForRole(ctx, match._id, "roster"),
+    namesForRole(ctx, match._id, "waitlist"),
+  ]);
+  return {
+    ...match,
+    rosterCount: rosterNames.length,
+    rosterNames,
+    waitlistNames,
+  };
+}
+
+// Open = not deleted and not yet started. Sorted soonest-first — the bulk
+// repost (repostAllMatches) treats this as the AUTHORITATIVE complete list
+// of what to repost, not just a display bound, so it needs a bound
+// generous enough that a real community's concurrently-open matches never
+// hit it (unlike a stat-card count, silently dropping matches here means
+// they just don't get reposted, with no error). Also resolves roster/
+// waitlist first names — full names shown inline (per explicit user
+// decision, revisiting CLAUDE.md's original "collapsed rosters" call — see
+// TODO.md's board model note). The 4096-char guard in
+// lib/matchMessage.ts's renderMatchMessage is the safety net if a single
+// match's card ever gets too long.
 export const listOpenWithRosterCounts = internalQuery({
   args: {},
   handler: async (ctx) => {
@@ -292,42 +390,24 @@ export const listOpenWithRosterCounts = internalQuery({
           q.eq("isDeleted", false).gte("startsAt", Date.now()),
         )
         .order("asc")
-        .take(50)
+        .take(200)
     ).filter((m) => m.isPublished);
 
-    const namesFor = async (matchId: Id<"matches">, role: "roster" | "waitlist") => {
-      const memberships = await ctx.db
-        .query("memberships")
-        .withIndex("by_match_and_role", (q) =>
-          q.eq("matchId", matchId).eq("role", role),
-        )
-        .take(200);
+    return await Promise.all(matches.map((match) => withRosterCounts(ctx, match)));
+  },
+});
 
-      const players = await Promise.all(
-        memberships
-          .filter((m) => !m.isDeleted)
-          .map((m) => ctx.db.get("players", m.playerId)),
-      );
-
-      return players
-        .filter((p): p is NonNullable<typeof p> => p !== null)
-        .map((p) => ({ name: p.firstName, telegramUserId: p.telegramUserId }));
-    };
-
-    return await Promise.all(
-      matches.map(async (match) => {
-        const [rosterNames, waitlistNames] = await Promise.all([
-          namesFor(match._id, "roster"),
-          namesFor(match._id, "waitlist"),
-        ]);
-        return {
-          ...match,
-          rosterCount: rosterNames.length,
-          rosterNames,
-          waitlistNames,
-        };
-      }),
-    );
+// Single-match sibling of listOpenWithRosterCounts, used by
+// telegram/matchBoard.ts's syncMatchMessage to resync just one match's
+// message instead of reloading everything. Returns null when the match is
+// gone/cancelled/still a draft — the caller treats that as "this match
+// shouldn't have a live Telegram message" and cleans up accordingly.
+export const getOpenWithRosterCountsById = internalQuery({
+  args: { matchId: v.id("matches") },
+  handler: async (ctx, { matchId }) => {
+    const match = await ctx.db.get("matches", matchId);
+    if (!match || match.isDeleted || !match.isPublished) return null;
+    return await withRosterCounts(ctx, match);
   },
 });
 
@@ -452,6 +532,12 @@ export const getMatchDetail = query({
 // board model says full rosters show "one tap (or the web view)". Admins
 // additionally see drafts (isPublished: false) so they can review and
 // publish them; regular players only ever see published matches.
+//
+// Stays bounded/unpaginated on purpose (take(50)) — it only backs the
+// dashboard's preview list and the matches page's aggregate stat-card
+// block, both of which only ever need "enough to summarize," not the full
+// list. See listUpcomingForPlayerPage for what the "Активные" tab's actual
+// scrollable list renders from.
 export const listUpcomingForPlayer = query({
   args: {},
   handler: async (ctx) => {
@@ -495,16 +581,20 @@ export const listUpcomingForPlayer = query({
   },
 });
 
-// Same shape as listAllForPlayerPage, mirrored for the matches page's
-// "Прошедшие" quick view — matches that have already happened, most
-// recent first. Paginated for the same reason as "Все игры": past-match
-// history has no natural upper bound as a community's history grows, so a
-// bounded take() would eventually start silently dropping the oldest
-// matches. See listAllForPlayerPage's comment for the isPublished-after-
-// paginate tradeoff (short pages for non-admins is expected, not a bug).
-export const listPastForPlayerPage = query({
-  args: { paginationOpts: paginationOptsValidator },
-  handler: async (ctx, { paginationOpts }) => {
+// Paginated sibling of listUpcomingForPlayer — this is what the matches
+// page's "Активные" tab actually renders its scrollable list from, so a
+// community running more concurrent open matches than
+// listUpcomingForPlayer's take(50) bound doesn't silently truncate.
+// Soonest-first (ascending), mirroring listUpcomingForPlayer's own order.
+//
+// `now` is passed in by the client (captured once when pagination starts)
+// rather than computed here with Date.now() — a paginated query's cursor
+// encodes the exact index range it was generated from, so recomputing
+// Date.now() on every page fetch shifts that range slightly each time and
+// Convex rejects the next page's cursor as "from a different query".
+export const listUpcomingForPlayerPage = query({
+  args: { paginationOpts: paginationOptsValidator, now: v.number() },
+  handler: async (ctx, { paginationOpts, now }) => {
     const player = await requireAuthedPlayer(ctx).catch(() => null);
     if (!player) {
       return { page: [], isDone: true, continueCursor: "" };
@@ -513,7 +603,65 @@ export const listPastForPlayerPage = query({
     const result = await ctx.db
       .query("matches")
       .withIndex("by_isDeleted_startsAt", (q) =>
-        q.eq("isDeleted", false).lt("startsAt", Date.now()),
+        q.eq("isDeleted", false).gte("startsAt", now),
+      )
+      .order("asc")
+      .paginate(paginationOpts);
+
+    const page = await Promise.all(
+      result.page
+        .filter((m) => m.isPublished || player.isAdmin)
+        .map(async (match) => {
+          const memberships = await ctx.db
+            .query("memberships")
+            .withIndex("by_match", (q) => q.eq("matchId", match._id))
+            .take(400);
+
+          const members = await Promise.all(
+            memberships
+              .filter((m) => !m.isDeleted)
+              .map(async (m) => ({
+                role: m.role,
+                player: await ctx.db.get("players", m.playerId),
+              })),
+          );
+
+          return {
+            match,
+            roster: members.filter((m) => m.role === "roster"),
+            waitlist: members.filter((m) => m.role === "waitlist"),
+          };
+        }),
+    );
+
+    return { ...result, page };
+  },
+});
+
+// Same shape as listAllForPlayerPage, mirrored for the matches page's
+// "Прошедшие" quick view — matches that have already happened, most
+// recent first. Paginated for the same reason as "Все игры": past-match
+// history has no natural upper bound as a community's history grows, so a
+// bounded take() would eventually start silently dropping the oldest
+// matches. See listAllForPlayerPage's comment for the isPublished-after-
+// paginate tradeoff (short pages for non-admins is expected, not a bug).
+//
+// `now` is client-supplied (see listUpcomingForPlayerPage's comment) so the
+// index range stays stable across a single pagination session's page
+// fetches — Date.now() ticking forward between fetches would otherwise
+// invalidate the cursor.
+export const listPastForPlayerPage = query({
+  args: { paginationOpts: paginationOptsValidator, now: v.number() },
+  handler: async (ctx, { paginationOpts, now }) => {
+    const player = await requireAuthedPlayer(ctx).catch(() => null);
+    if (!player) {
+      return { page: [], isDone: true, continueCursor: "" };
+    }
+
+    const result = await ctx.db
+      .query("matches")
+      .withIndex("by_isDeleted_startsAt", (q) =>
+        q.eq("isDeleted", false).lt("startsAt", now),
       )
       .order("desc")
       .paginate(paginationOpts);
@@ -683,16 +831,20 @@ export const listMyHistory = query({
 // file (listAllForPlayerPage's isPublished filter): a filtered-heavy page
 // can come back shorter than requested, which is fine for a "Показать ещё"
 // button but would be wrong for anything expecting exact page sizes.
+//
+// `now` is client-supplied (see listUpcomingForPlayerPage's comment) so the
+// index range stays stable across a single pagination session.
 async function paginateMembershipHistory(
   ctx: QueryCtx,
   playerId: Id<"players">,
   role: "roster" | "waitlist" | undefined,
   paginationOpts: PaginationOptions,
+  now: number,
 ) {
   const result = await ctx.db
     .query("memberships")
     .withIndex("by_player_and_matchStartsAt", (q) =>
-      q.eq("playerId", playerId).lt("matchStartsAt", Date.now()),
+      q.eq("playerId", playerId).lt("matchStartsAt", now),
     )
     .order("desc")
     .paginate(paginationOpts);
@@ -720,11 +872,12 @@ export const listMyHistoryPage = query({
   args: {
     paginationOpts: paginationOptsValidator,
     role: v.optional(v.union(v.literal("roster"), v.literal("waitlist"))),
+    now: v.number(),
   },
-  handler: async (ctx, { paginationOpts, role }) => {
+  handler: async (ctx, { paginationOpts, role, now }) => {
     const player = await requireAuthedPlayer(ctx).catch(() => null);
     if (!player) return { page: [], isDone: true, continueCursor: "" };
-    return paginateMembershipHistory(ctx, player._id, role, paginationOpts);
+    return paginateMembershipHistory(ctx, player._id, role, paginationOpts, now);
   },
 });
 
@@ -737,7 +890,11 @@ async function distinctFieldValues(
   field: "court" | "format" | "level",
 ) {
   if (!(await requireAdminPlayer(ctx).catch(() => null))) return [];
-  const matches = await ctx.db.query("matches").order("desc").take(200);
+  const matches = await ctx.db
+    .query("matches")
+    .withIndex("by_isDeleted_startsAt", (q) => q.eq("isDeleted", false))
+    .order("desc")
+    .take(200);
   return [...new Set(matches.map((m) => m[field]))];
 }
 
@@ -799,13 +956,17 @@ export const listAllForCalendar = query({
 // Paginated for the same reason as listMyHistoryPage: no natural upper
 // bound on how long a player has been in the community.
 export const listHistoryForPlayerPage = query({
-  args: { playerId: v.id("players"), paginationOpts: paginationOptsValidator },
-  handler: async (ctx, { playerId, paginationOpts }) => {
+  args: {
+    playerId: v.id("players"),
+    paginationOpts: paginationOptsValidator,
+    now: v.number(),
+  },
+  handler: async (ctx, { playerId, paginationOpts, now }) => {
     // Graceful-degrade on a transient auth race (see players.listAll).
     if (!(await requireAdminPlayer(ctx).catch(() => null))) {
       return { page: [], isDone: true, continueCursor: "" };
     }
-    return paginateMembershipHistory(ctx, playerId, undefined, paginationOpts);
+    return paginateMembershipHistory(ctx, playerId, undefined, paginationOpts, now);
   },
 });
 
@@ -879,42 +1040,13 @@ export const getAttendedMatchDays = query({
   },
 });
 
-// Bot command support — "/matches": every open (upcoming, published)
-// match, same data the board already shows. internalQuery (not exposed to
-// the browser) since the bot resolves "who's asking" from the Telegram
-// update, not a web session.
-export const listOpenForBotCommand = internalQuery({
-  args: {},
-  handler: async (ctx) => {
-    const matches = (
-      await ctx.db
-        .query("matches")
-        .withIndex("by_isDeleted_startsAt", (q) =>
-          q.eq("isDeleted", false).gte("startsAt", Date.now()),
-        )
-        .order("asc")
-        .take(20)
-    ).filter((m) => m.isPublished);
-
-    return await Promise.all(
-      matches.map(async (match) => {
-        const roster = await ctx.db
-          .query("memberships")
-          .withIndex("by_match_and_role", (q) =>
-            q.eq("matchId", match._id).eq("role", "roster"),
-          )
-          .take(200);
-        return { match, rosterCount: roster.filter((m) => !m.isDeleted).length };
-      }),
-    );
-  },
-});
-
-// Bot command support — "/my": every match (past + upcoming, roster or
-// waitlist) the calling Telegram user has a live membership in, newest
-// first. Resolves the player from telegramUserId (bot context has no web
-// session to derive it from), unlike the dashboard's listMyHistory.
-export const listHistoryForTelegramUser = internalQuery({
+// Bot command support — "/my": only the calling Telegram user's UPCOMING
+// (not yet started, roster or waitlist) matches, soonest first. Past
+// matches aren't the point of a quick "what am I signed up for" check —
+// that's what the dashboard's history views are for. Resolves the player
+// from telegramUserId (bot context has no web session to derive it from),
+// unlike the dashboard's listMyHistory.
+export const listUpcomingForTelegramUser = internalQuery({
   args: { telegramUserId: v.number() },
   handler: async (ctx, { telegramUserId }) => {
     const player = await ctx.db
@@ -934,11 +1066,12 @@ export const listHistoryForTelegramUser = internalQuery({
         .map(async (m) => ({ membership: m, match: await ctx.db.get("matches", m.matchId) })),
     );
 
+    const now = Date.now();
     return withMatch
       .filter(
         (row): row is { membership: Doc<"memberships">; match: Doc<"matches"> } =>
-          !!row.match && !row.match.isDeleted,
+          !!row.match && !row.match.isDeleted && row.match.startsAt >= now,
       )
-      .sort((a, b) => b.match.startsAt - a.match.startsAt);
+      .sort((a, b) => a.match.startsAt - b.match.startsAt);
   },
 });

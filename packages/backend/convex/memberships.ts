@@ -167,7 +167,7 @@ export const joinMatchSelf = mutation({
     }
 
     const result = await joinOrResurrectMembership(ctx, matchId, player._id, "self");
-    await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
+    await ctx.scheduler.runAfter(0, internal.telegram.matchBoard.syncMatchMessage, { matchId });
     return result;
   },
 });
@@ -221,7 +221,9 @@ export const leaveMatch = mutation({
     }
 
     await dropMembership(ctx, membership, "self");
-    await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
+    await ctx.scheduler.runAfter(0, internal.telegram.matchBoard.syncMatchMessage, {
+      matchId: membership.matchId,
+    });
   },
 });
 
@@ -241,7 +243,9 @@ export const removeMember = mutation({
       membershipId,
       kind: "removed",
     });
-    await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
+    await ctx.scheduler.runAfter(0, internal.telegram.matchBoard.syncMatchMessage, {
+      matchId: membership.matchId,
+    });
   },
 });
 
@@ -322,7 +326,9 @@ export const promoteFromWaitlist = mutation({
       membershipId,
       kind: "promoted",
     });
-    await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
+    await ctx.scheduler.runAfter(0, internal.telegram.matchBoard.syncMatchMessage, {
+      matchId: membership.matchId,
+    });
   },
 });
 
@@ -376,7 +382,9 @@ export const addGuestToMatch = mutation({
       matchStartsAt: match.startsAt,
     });
 
-    await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
+    await ctx.scheduler.runAfter(0, internal.telegram.matchBoard.syncMatchMessage, {
+      matchId: args.matchId,
+    });
     return guestId;
   },
 });
@@ -397,7 +405,7 @@ export const addExistingPlayerToMatch = mutation({
     const result = await joinOrResurrectMembership(ctx, matchId, playerId, {
       admin: admin._id,
     });
-    await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
+    await ctx.scheduler.runAfter(0, internal.telegram.matchBoard.syncMatchMessage, { matchId });
     return result;
   },
 });

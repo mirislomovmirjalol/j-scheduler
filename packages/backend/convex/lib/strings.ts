@@ -36,15 +36,23 @@ export const strings = {
     `🎉 Место освободилось — ты в ростере на игру ${dateTime}!`,
 
   matchesCommandDescription: "Все открытые игры",
-  myCommandDescription: "Игры, на которые я записан(а)",
+  myCommandDescription: "Мои предстоящие игры",
   noOpenMatches: "Сейчас нет открытых игр 🙌",
   openMatchesHeader: "🎾 Открытые игры",
   matchLine: (params: { dateTime: string; court: string; format: string; level: string; rosterCount: number; maxMembers: number }) =>
     `${params.dateTime} · ${params.court} · ${params.format} · Уровень ${params.level} · 👥 ${params.rosterCount}/${params.maxMembers}`,
-  noPersonalMatches: "Ты пока никуда не записывался(-ась) 🤷",
-  myMatchesHeader: "🎾 Твои игры",
-  myMatchLine: (params: { dateTime: string; court: string; isPast: boolean; role: "roster" | "waitlist" }) =>
-    `${params.isPast ? "✅" : "📅"} ${params.dateTime} · ${params.court}${
+  // groupUsername comes from the TELEGRAM_GROUP_USERNAME env var (per
+  // CLAUDE.md §8, staging and prod each have their own bot + group — a
+  // hardcoded link here would send staging testers to the real community).
+  // Falls back to a link-less nudge if it isn't configured.
+  joinMatchesInGroup: (groupUsername?: string) =>
+    groupUsername
+      ? `Записаться можно в группе 🎾\nhttps://t.me/${groupUsername}`
+      : "Записаться можно в группе 🎾",
+  noPersonalMatches: "Ты пока никуда не записан(-а) на предстоящие игры 🤷",
+  myMatchesHeader: "🎾 Твои предстоящие игры",
+  myMatchLine: (params: { dateTime: string; court: string; role: "roster" | "waitlist" }) =>
+    `📅 ${params.dateTime} · ${params.court}${
       params.role === "waitlist" ? " · лист ожидания" : ""
     }`,
   myMatchesTruncated: (shown: number, total: number) =>

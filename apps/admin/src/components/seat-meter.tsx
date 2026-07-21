@@ -27,7 +27,7 @@ export default function SeatMeter({
           <span
             key={i}
             className={cn(
-              "h-2.5 w-2.5",
+              "h-2.5 w-2.5 rounded-full",
               i < rosterCount ? "bg-foreground" : "ring-1 ring-border ring-inset",
             )}
           />

@@ -55,9 +55,12 @@ export const handleMessage = internalAction({
     }
 
     // "/matches" — every open (upcoming, published) match, open to anyone,
-    // in whatever chat it's asked in. Mirrors the board's own data.
+    // in whatever chat it's asked in. Each match is now its own message in
+    // the group (CLAUDE.md §4's board model) with its own Join button, so
+    // this reply is informational only — it points people at the group to
+    // actually join instead of listing dead Join buttons here.
     if (text?.startsWith("/matches") && chat?.id) {
-      const matches = await ctx.runQuery(internal.matches.listOpenForBotCommand, {});
+      const matches = await ctx.runQuery(internal.matches.listOpenWithRosterCounts, {});
       if (matches.length === 0) {
         await callTelegramApi("sendMessage", { chat_id: chat.id, text: strings.noOpenMatches });
         return;
@@ -65,35 +68,37 @@ export const handleMessage = internalAction({
       const lines = [
         strings.openMatchesHeader,
         "",
-        ...matches.map(({ match, rosterCount }) =>
+        ...matches.map((match) =>
           strings.matchLine({
             dateTime: formatTashkentDateTime(match.startsAt),
             court: match.court,
             format: match.format,
             level: match.level,
-            rosterCount,
+            rosterCount: match.rosterCount,
             maxMembers: match.maxMembers,
           }),
         ),
+        "",
+        strings.joinMatchesInGroup(process.env.TELEGRAM_GROUP_USERNAME),
       ];
       await callTelegramApi("sendMessage", { chat_id: chat.id, text: lines.join("\n") });
       return;
     }
 
-    // "/my" — every match (past + upcoming, roster or waitlist) the caller
-    // has a live membership in. Personal, so no scale/broadcast concern —
-    // just a length cap on the reply itself.
+    // "/my" — the caller's UPCOMING matches only (roster or waitlist), not
+    // past ones — a quick "what am I signed up for" check, not a history
+    // browser (the dashboard covers history). Personal, so no scale/
+    // broadcast concern — just a length cap on the reply itself.
     if (text?.startsWith("/my") && chat?.id && from?.id) {
-      const history = await ctx.runQuery(internal.matches.listHistoryForTelegramUser, {
+      const upcoming = await ctx.runQuery(internal.matches.listUpcomingForTelegramUser, {
         telegramUserId: from.id,
       });
-      if (history.length === 0) {
+      if (upcoming.length === 0) {
         await callTelegramApi("sendMessage", { chat_id: chat.id, text: strings.noPersonalMatches });
         return;
       }
-      const now = Date.now();
       const SHOWN_LIMIT = 20;
-      const shown = history.slice(0, SHOWN_LIMIT);
+      const shown = upcoming.slice(0, SHOWN_LIMIT);
       const lines = [
         strings.myMatchesHeader,
         "",
@@ -101,14 +106,13 @@ export const handleMessage = internalAction({
           strings.myMatchLine({
             dateTime: formatTashkentDateTime(match.startsAt),
             court: match.court,
-            isPast: match.startsAt < now,
             role: membership.role,
           }),
         ),
       ];
       let text2 = lines.join("\n");
-      if (history.length > SHOWN_LIMIT) {
-        text2 += strings.myMatchesTruncated(SHOWN_LIMIT, history.length);
+      if (upcoming.length > SHOWN_LIMIT) {
+        text2 += strings.myMatchesTruncated(SHOWN_LIMIT, upcoming.length);
       }
       await callTelegramApi("sendMessage", { chat_id: chat.id, text: text2 });
       return;
@@ -183,7 +187,9 @@ export const handleCallbackQuery = internalAction({
           });
 
           if (result.outcome !== "not_a_member") {
-            await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
+            await ctx.scheduler.runAfter(0, internal.telegram.matchBoard.syncMatchMessage, {
+              matchId,
+            });
           }
           return;
         }
@@ -213,14 +219,17 @@ export const handleCallbackQuery = internalAction({
         });
 
         if (result.outcome !== "match_gone") {
-          await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
+          await ctx.scheduler.runAfter(0, internal.telegram.matchBoard.syncMatchMessage, {
+            matchId,
+          });
         }
         return;
       }
 
       // dropMatch — reached from the Drop button on a reminder DM.
+      const dropMatchId = dropMatch![1] as Id<"matches">;
       const result = await ctx.runMutation(internal.memberships.dropMatch, {
-        matchId: dropMatch![1] as Id<"matches">,
+        matchId: dropMatchId,
         telegramUserId: from.id,
       });
 
@@ -233,7 +242,9 @@ export const handleCallbackQuery = internalAction({
       });
 
       if (result.outcome !== "not_a_member") {
-        await ctx.scheduler.runAfter(0, internal.telegram.board.syncBoard, {});
+        await ctx.scheduler.runAfter(0, internal.telegram.matchBoard.syncMatchMessage, {
+          matchId: dropMatchId,
+        });
       }
     } catch (err) {
       console.error("callback_query handling failed", err);

@@ -31,4 +31,11 @@ crons.interval(
   {},
 );
 
+crons.interval(
+  "unpin started matches",
+  { hours: 1 },
+  internal.telegram.matchBoard.unpinStartedMatches,
+  {},
+);
+
 export default crons;

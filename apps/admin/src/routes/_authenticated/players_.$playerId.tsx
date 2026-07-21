@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@J-schedule/ui/compone
 import { Skeleton } from "@J-schedule/ui/components/skeleton"
 import { createFileRoute, Navigate } from "@tanstack/react-router"
 import { usePaginatedQuery, useQuery } from "convex/react"
+import { useState } from "react"
 import { toast } from "sonner"
 
 import BackButton from "@/components/back-button"
@@ -25,11 +26,18 @@ function PlayerProfilePage() {
   const { playerId } = Route.useParams()
   const id = playerId as Id<"players">
   const player = useQuery(api.players.getById, { playerId: id })
+  // Captured once — see matches.index.tsx's comment on why this can't be
+  // Date.now() recomputed inside the paginated query itself.
+  const [now] = useState(() => Date.now())
   const {
     results: history,
     status: historyStatus,
     loadMore: loadMoreHistory,
-  } = usePaginatedQuery(api.matches.listHistoryForPlayerPage, { playerId: id }, { initialNumItems: 20 })
+  } = usePaginatedQuery(
+    api.matches.listHistoryForPlayerPage,
+    { playerId: id, now },
+    { initialNumItems: 20 },
+  )
   const {
     results: noShows,
     status: noShowsStatus,

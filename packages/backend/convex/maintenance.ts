@@ -59,7 +59,8 @@ export const wipeAllDataKeepAdmins = internalMutation({
     for (const table of [
       "matches",
       "memberships",
-      "boardState",
+      "matchBoardMessages",
+      "boardRepostLock",
       "processedUpdates",
       "webLoginRequests",
     ] as const) {

@@ -13,6 +13,7 @@ import {
 } from "@J-schedule/ui/components/alert-dialog"
 import { Badge } from "@J-schedule/ui/components/badge"
 import { Button } from "@J-schedule/ui/components/button"
+import { Checkbox } from "@J-schedule/ui/components/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -21,6 +22,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@J-schedule/ui/components/dialog"
+import { Empty, EmptyDescription } from "@J-schedule/ui/components/empty"
 import { Input } from "@J-schedule/ui/components/input"
 import { Label } from "@J-schedule/ui/components/label"
 import { Skeleton } from "@J-schedule/ui/components/skeleton"
@@ -34,6 +36,7 @@ import {
 } from "@J-schedule/ui/components/table"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { useMutation, useQuery } from "convex/react"
+import { ConvexError } from "convex/values"
 import { useState } from "react"
 import { toast } from "sonner"
 
@@ -43,6 +46,7 @@ import DraftBadge from "@/components/draft-badge"
 import Reveal from "@/components/reveal"
 import SeatMeter from "@/components/seat-meter"
 import ShakeField from "@/components/shake-field"
+import SuccessCheck from "@/components/success-check"
 import TextSwap from "@/components/text-swap"
 import { formatTashkentDateTime } from "@/lib/format"
 import { useDebouncedValue } from "@/lib/use-debounced-value"
@@ -61,9 +65,12 @@ function MatchDetailPage() {
   })
   const cancelMatch = useMutation(api.matches.cancelMatch)
   const publishMatch = useMutation(api.matches.publishMatch)
+  const repostMatchToGroup = useMutation(api.matches.repostMatchToGroup)
   const leaveMatch = useMutation(api.memberships.leaveMatch)
   const joinMatchSelf = useMutation(api.memberships.joinMatchSelf)
   const navigate = useNavigate()
+  const [pinOnRepost, setPinOnRepost] = useState(false)
+  const [reposting, setReposting] = useState(false)
 
   if (detail === undefined) {
     return (
@@ -137,6 +144,40 @@ function MatchDetailPage() {
               >
                 Опубликовать
               </Button>
+            )}
+            {match.isPublished && (
+              <div className="flex w-full items-center gap-2 sm:w-auto">
+                <Label htmlFor="pin-on-repost" className="normal-case">
+                  <Checkbox
+                    id="pin-on-repost"
+                    checked={pinOnRepost}
+                    onCheckedChange={(checked) => setPinOnRepost(checked === true)}
+                  />
+                  Закрепить
+                </Label>
+                <Button
+                  variant="outline"
+                  disabled={reposting}
+                  className="flex-1 sm:flex-none"
+                  onClick={async () => {
+                    setReposting(true)
+                    try {
+                      await repostMatchToGroup({ matchId: match._id, pin: pinOnRepost })
+                      toast.success("Игра отправлена в группу")
+                    } catch (err) {
+                      toast.error(
+                        err instanceof ConvexError
+                          ? (err.data as string)
+                          : "Не получилось отправить игру",
+                      )
+                    } finally {
+                      setReposting(false)
+                    }
+                  }}
+                >
+                  <TextSwap>{reposting ? "Отправляем…" : "Отправить в группу"}</TextSwap>
+                </Button>
+              </div>
             )}
             <Button
               variant="outline"
@@ -334,7 +375,9 @@ function MemberSection({
         </span>
       </h2>
       {members.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{emptyText}</p>
+        <Empty className="p-4">
+          <EmptyDescription>{emptyText}</EmptyDescription>
+        </Empty>
       ) : (
         <Table>
           <TableHeader>

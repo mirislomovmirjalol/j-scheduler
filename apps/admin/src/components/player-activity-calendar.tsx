@@ -4,6 +4,7 @@ import { Skeleton } from "@J-schedule/ui/components/skeleton"
 import { useQuery } from "convex/react"
 
 import MatchCalendarHeatmap from "@/components/match-calendar-heatmap"
+import { pluralizeRu } from "@/lib/format"
 
 // Shared by the admin player-profile page and the public profile page —
 // same GitHub-style heatmap the admin dashboard already uses for
@@ -30,7 +31,8 @@ export default function PlayerActivityCalendar({ playerId }: { playerId: Id<"pla
           timeZone: "UTC",
         })
         if (matchCount === 0) return `${dateText} · не играл(а)`
-        return `${dateText} · ${matchCount === 1 ? "играл(а)" : `играл(а) ${matchCount} раза`}`
+        if (matchCount === 1) return `${dateText} · играл(а)`
+        return `${dateText} · играл(а) ${matchCount} ${pluralizeRu(matchCount, ["раз", "раза", "раз"])}`
       }}
     />
   )

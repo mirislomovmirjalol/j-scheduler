@@ -21,11 +21,12 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 blocked · 💡 v2
 - [x] Set Convex env vars: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_SECRET_TOKEN`,
       `TELEGRAM_CHAT_ID`, `SEED_ADMIN_TELEGRAM_ID` set on **both** the dev
       deployment and prod (`adept-dove-810`).
-- [ ] Commit `schema.ts`, `CLAUDE.md`, `TODO.md`.
+- [x] Commit `schema.ts`, `CLAUDE.md`, `TODO.md`.
 
 ## Milestone 1 — Schema ✅ (delivered)
 
-- [x] Define all seven tables + indexes (`schema.ts`).
+- [x] Define all core tables + indexes (`schema.ts`) — started at seven,
+      `communitySettings` added later in Milestone 10 (eight now).
 - [x] Push schema to Convex, confirm it deploys clean. (verified via
       `convex dev --once`)
 - [x] Seed the first admin from `SEED_ADMIN_TELEGRAM_ID`. (bootstrapped on
@@ -64,11 +65,15 @@ verified end-to-end against the dev deployment with synthetic webhook POSTs.
 
 - [x] Convex mutations: `createMatch`, `editMatch` (`convex/matches.ts`,
       shared write path — no other code path writes to `matches`).
-- [x] Board renderer: all open matches, **sorted by `startsAt`**, full inline
-      rosters/waitlists, header + count + Join button. Guard the 4096-char
-      limit. (`convex/lib/board.ts`, pure function, easy to unit test later.)
-- [x] Post board to group; store `messageId` in `boardState`.
-      (`convex/telegram/board.ts` syncBoard action + `convex/boardState.ts`)
+- [x] Board renderer: one message per match, full inline rosters/waitlists,
+      header + count + Join button. Guard the 4096-char limit.
+      (`convex/lib/matchMessage.ts`, pure function, easy to unit test later.
+      Originally one combined message for all open matches — split into
+      per-match messages later, see the "board split into per-match
+      messages" changelog entry below.)
+- [x] Post each match's message to the group; store `messageId` per match in
+      `matchBoardMessages`. (`convex/telegram/matchBoard.ts` syncMatchMessage
+      action + `convex/matchBoardMessages.ts`)
 - [x] Reschedule cancels stale reminder jobs (via `matchReminders`) before
       rescheduling. (Reschedule = editMatch changing `startsAt`.) Currently a
       no-op in practice since Milestone 7 hasn't populated `matchReminders`
@@ -104,12 +109,14 @@ this gap when the dashboard starts calling them.
       Rule 2). (`convex/memberships.ts`)
 - [x] Guard double-join (`by_match_and_player`) — re-tapping Join returns
       `alreadyJoined: true` with current role, no duplicate row.
-- [x] Recompute + edit board in place; swallow "not modified". Edit
-      **coalescing** on rapid taps is NOT implemented — each Join schedules
-      its own `syncBoard` call. For this community's scale (dozens, not
-      thousands, of concurrent tappers) this stays well inside Telegram's
-      per-chat edit rate limit; revisit if Milestone 10 load testing says
-      otherwise.
+- [x] Recompute + edit that match's message in place; swallow "not
+      modified". Edit **coalescing** on rapid taps is NOT implemented — each
+      Join schedules its own `syncMatchMessage` call. For this community's
+      scale (dozens, not thousands, of concurrent tappers) this stays well
+      inside Telegram's per-chat edit rate limit; revisit if a real load test
+      ever says
+      otherwise (Milestone 9's "rate-limit sender load-tested" item covers
+      the DM side, not this).
 
 **Test:** two simultaneous taps for the last seat → one roster, one
 waitlist. ✅ Verified directly against the dev deployment: fired two
@@ -123,9 +130,10 @@ Automatic repost-on-burial (a `messagesSincePost` counter incrementing on
 group chatter, auto delete-and-repost past a threshold) is **permanently
 descoped**, not just blocked. It would've needed disabling the bot's group
 privacy mode (@BotFather → Bot Settings → Group Privacy → off) to see
-regular chatter, which is its own tradeoff. The manual «Отправить в группу»
-button (`boardState.repostToGroup`, admin dashboard) covers this well enough
-in practice — an admin reposts when they notice the board's buried. The
+regular chatter, which is its own tradeoff. The manual «Отправить в группу» /
+«Отправить все игры» buttons (`matches.repostMatchToGroup` /
+`matches.repostAllToGroup`, admin dashboard) cover this well enough in
+practice — an admin reposts when they notice a match buried. The
 `messagesSincePost`/`lastPostedAt` schema fields have been removed since they
 were write-only dead weight.
 
@@ -188,27 +196,38 @@ design-focused UI than the first pass.
       in `convex/lib/board.ts` / `matches.ts`; `apps/admin` has no strings
       module at all yet. Deliberately not done in the same pass as the other
       hardening items — it touches every user-facing string in both the bot
-      and the dashboard and deserves its own careful, testable pass.
-- [ ] Decide the fate of the untracked, unmounted dashboard chart components
-      (`match-calendar-heatmap.tsx`, `match-trend-charts.tsx`, plus the
-      `matches.listAllForCalendar` query built for them) — wire them into the
-      dashboard, or delete them. They're currently `git clean`-fragile
-      (untracked).
-- [ ] Once you're ready, retire `apps/web`: verify the admin app end-to-end,
-      delete `apps/web` + `packages/ui/src/components/dropdown-menu.tsx`
-      (its only consumer), repoint/retire the old "web" Vercel project.
+      and the dashboard and deserves its own careful, testable pass. Still
+      the single most overdue item on this list.
+- [x] Decide the fate of the dashboard chart components
+      (`match-calendar-heatmap.tsx`, `match-trend-charts.tsx`) — kept and
+      wired in (calendar heatmap now also powers the per-player activity
+      calendar on both the admin and public profile pages); both are
+      git-tracked now, no longer `git clean`-fragile.
+- [x] ~~Retire `apps/web`~~ — superseded by a different decision: instead of
+      deleting it, `apps/web` was **repurposed** into a public Next.js
+      marketing site (home/about/community/tournaments, no auth), separate
+      from the actual dashboard (`apps/admin`). Nothing left to retire —
+      `packages/ui/src/components/dropdown-menu.tsx` is still live, now used
+      by `apps/admin`'s own `user-menu.tsx`.
 
 ## Milestone 9 — Hardening before prod
 
 - [x] Point **prod** bot webhook at prod Convex (see Milestone 0).
-- [ ] Confirm bot admin rights in игры (the real group, not the test group).
+- [x] Confirm bot admin rights in игры (the real group, not the test group) —
+      including the granular "Manage Topics" right, needed once the board
+      started posting into the group's "Игры" forum topic.
 - [ ] Verify Russian strings everywhere; no English leaks.
 - [ ] Rate-limit sender load-tested against a full roster sweep.
 - [x] Dead-man's-switch false-positive bug fixed (see below) — logging exists
       via `console.log`/`console.error`, visible in the Convex dashboard.
-- [ ] Seed prod admin (log into the admin app with the `SEED_ADMIN_TELEGRAM_ID`
+- [x] Seed prod admin (log into the admin app with the `SEED_ADMIN_TELEGRAM_ID`
       account — auto-grants admin on first login, no `/start` needed); walk
       the full flow once end-to-end against the real group before general use.
+      **Prod is now live**: real matches created, players joining from both
+      the group and the web dashboard (33 memberships as of 2026-07). Prod
+      was deliberately wiped to admins-only once (`maintenance.wipeAllData
+      KeepAdmins`, 2026-07) right before this rollout, to clear test data
+      without touching the admin roster.
 
 **Bug fixes from the 2026-07 audit** (see `AUDIT.md` §2 for full detail):
 
@@ -239,20 +258,110 @@ design-focused UI than the first pass.
       lock the community out of the dashboard. Revisit if this ever actually
       happens.
 
+## Milestone 10 — Player-facing depth + prod rollout (2026-07) ✅
+
+Built directly against the now-live prod community, each piece tested against
+dev first. Two items formerly sitting in the v2 backlog (payment tracking,
+attendance/no-show reliability) got promoted and shipped here — see CLAUDE.md
+§10 for the updated scope split.
+
+- [x] **Attendance tracking** — `memberships.noShow`. Default-attended for
+      everyone; an admin flags a no-show after the fact on a past match's
+      roster (never an opt-in check-in flow — this was an explicit product
+      decision, not a simplification). Surfaced as a no-show list on the
+      admin player-profile page.
+- [x] **Public player profiles** — `/p/:playerId`, no auth required, name +
+      level + GitHub-style activity calendar only (explicit privacy decision
+      — no username, no contact info). Shareable outside Telegram.
+- [x] **Player self-serve join from the web** — `memberships.joinMatchSelf`,
+      the same capacity-check/waitlist logic as the bot's `joinMatch` and the
+      admin's add-existing-player, via one shared `joinOrResurrectMembership`
+      helper (Golden Rule 1 — three call sites, one write path).
+- [x] **Bot commands `/matches` and `/my`** — all open matches, and the
+      caller's own match history, both open to anyone, in group or DM.
+- [x] **`/pay` bot command** + `communitySettings` table (new, single-row) —
+      posts the admin-set payment info; works in the group or a DM, unlike
+      `/start` which only makes sense as a DM.
+- [x] **Manual payment tracking** — `memberships.paid`, admin-toggled from the
+      roster table. Redacted **server-side** for non-admin/non-owner readers,
+      not just hidden in the UI.
+- [x] **Matches page rework** — three mutually-exclusive views (Все игры /
+      Активные / Прошедшие) with sort fully decoupled from scope; real cursor
+      pagination on the two views with no natural upper bound (Все игры,
+      Прошедшие).
+- [x] **Cursor pagination extended to player history** — own history, admin-
+      viewed history, no-shows. Needed denormalizing `matches.startsAt` onto
+      `memberships.matchStartsAt` (kept in sync at write time) since Convex
+      can't paginate a join ordered by a field that only lives on the far
+      side of it. The old bounded reads (`listMyHistory` et al.) stayed, but
+      narrowed to backing only stat-card counts, never a rendered list.
+- [x] **Board → forum topic + pin-on-repost** — `TELEGRAM_TOPIC_ID` posts the
+      board into a specific topic (e.g. the group's "Игры" thread) instead of
+      the default thread; pinning fires only on a force-repost, never on a
+      silent join/leave edit. Surfaced a real Telegram gotcha along the way:
+      the bot needs the granular **"Manage Topics"** admin right, not just
+      general admin status, or posting into a closed topic fails
+      (`TOPIC_CLOSED`) — see CLAUDE.md §6.
+- [x] **Sidebar navigation rewrite** — `AppSidebar`/`SidebarProvider`
+      (`packages/ui`) replaced the earlier floating icon nav; added
+      `/profile` and `/settings` pages.
+- [x] **Prod data reset** — one-off `maintenance.wipeAllDataKeepAdmins`
+      (internalMutation, scoped/temporary deploy key, run once via CLI with
+      explicit confirmation) cleared test matches/memberships from prod right
+      before the real rollout, keeping only admin players. Prod has been live
+      with real usage since.
+- [ ] Register bot commands with Telegram's own `/` menu —
+      `telegram/commands:registerCommands` (`setMyCommands`) exists but
+      hasn't been run against prod yet. Commands work fine typed manually
+      either way; this is purely a discoverability nicety.
+- [x] **Board split into per-match messages** — reverses the earlier "one
+      combined board" decision (CLAUDE.md §4 now documents the new model).
+      Each open match gets its own Telegram message
+      (`telegram/matchBoard.ts` `syncMatchMessage`, tracked per-match in the
+      new `matchBoardMessages` table, replacing chat-keyed `boardState`).
+      Only ONE match is ever pinned at a time — pinning a match displaces
+      whatever was pinned before it, via `getChat` (asks Telegram what's
+      *actually* pinned, since our own bookkeeping drifted once already) +
+      a single targeted `unpinChatMessage`, deliberately not the heavier
+      `unpinAllChatMessages` (observed hitting Telegram's rate limit —
+      429 with a 3s+ `retry_after` — under light testing, which is also why
+      pinning is NOT automatic on publish: it's a manual, occasional admin
+      action via the "Закрепить" checkbox, default **off**, so it can't spam
+      notifications or trip that rate limit on its own). Pins fire **with
+      sound**. An hourly cron (`unpinStartedMatches`) unpins a match once it
+      starts, as a fallback for when nothing else took over the pin first.
+      The admin repost button split into a per-match repost (match detail
+      page) and a bulk "Отправить все игры" (matches list page, sequential
+      — not fire-and-forget — so concurrent reposts can't race each other's
+      delete-then-repost and produce duplicate messages; also the migration
+      backfill for matches that existed under the old combined-board model).
+- [x] **Bulk repost paced + lock-guarded for Telegram's per-group rate
+      limit.** Researched Telegram's official Bot API FAQ: a **group is
+      capped at ~20 new messages/minute**, well below the commonly-quoted
+      30/sec global or 1/sec per-chat numbers — a real risk once a community
+      runs enough matches to bulk-repost ~10 at once.
+      `telegram/matchBoard.ts`'s `repostAllMatches` now (1) paces sends
+      `GROUP_MESSAGE_PACING_MS` (3.2s) apart instead of firing a burst; (2)
+      pins **once per bulk run** (soonest match only, if requested) instead
+      of once per match — pinning is a separate, even stricter-limited
+      Telegram operation, and N pins in one batch is what actually tripped
+      429s during testing; (3) is guarded by a new `boardRepostLock` table
+      (schema.ts) so a second click during an in-flight (now
+      tens-of-seconds-long) bulk repost is refused with a toast rather than
+      firing an overlapping run — which is exactly what produced duplicate
+      match messages in the group before this lock existed. Pin-on-repost
+      checkboxes (both per-match and bulk) already default to **off** as of
+      the previous entry.
+
 ---
 
 ## v1.5 — promoted from backlog (small, high-value, not yet built)
 
-- 💡 **Payment tracking** — the biggest admin pain at current cadence. One
-  `paidAt?`/`paymentStatus` field on `memberships`, a toggle in the roster
-  table, a "кто не оплатил" line in the DM/summary. No amounts (already have
-  `pricePerPerson`), no payment provider, no receipts — just replaces the
-  "scroll the chat for who said перевёл" ritual.
-- 💡 **Board summary auto-text** — `lib/board.ts`'s `renderBoard` already has
-  all the data the hand-typed «Напоминание, завтра…» message repeats. Ship a
-  per-match "Сформировать текст" button in the dashboard that produces
-  copy-pasteable text; admin still posts it manually (keeps the human touch,
-  no new bot-permission surface).
+- 💡 **Board summary auto-text** — `lib/matchMessage.ts`'s `renderMatchMessage`
+  already has all the data the hand-typed «Напоминание, завтра…» message
+  repeats. Ship a per-match "Сформировать текст" button in the dashboard that
+  produces copy-pasteable text; admin still posts it manually (keeps the
+  human touch, no new bot-permission surface).
 
 ## v2 backlog (do NOT build without an explicit decision)
 
@@ -263,8 +372,9 @@ design-focused UI than the first pass.
   through to the next person, then fall back to today's behavior (board +
   admin). Builds on `extraSeatsOpened`/DM-button plumbing that already
   exists; needs one new concept, a pending offer with an expiry job (same
-  scheduler pattern as reminders). Prerequisite (admin-removal notifying the
-  waitlist) is already shipped.
+  scheduler pattern as reminders). Both prerequisites are now shipped:
+  admin-removal notifying the waitlist, and attendance tracking (`noShow`) if
+  offer order should ever weight reliability.
 - 💡 **One-click weekly templates** — save match config, spawn this week's game
   with one click (auto-fill everything, confirm date). Later: auto-spawn cron.
 - 💡 **Guest-bringing** — host + N guests, guest self-cancel independent of host,
@@ -273,14 +383,15 @@ design-focused UI than the first pass.
 - 💡 **Verified levels + enforcement** — real player levels; warn/block on join
   mismatch (e.g. "это уровень 2, всё равно записаться?").
 - 💡 **Court/venue table** — dropdown, default price per venue (replaces free text).
-- 💡 **Attendance / no-show reliability** — mark who actually showed; reliability
-  history. (Lunda covers stats today; memberships already leave room.) Sequence
-  after the waitlist auto-offer model, since reliability should inform offer order.
 - 💡 **Per-level admins** — scope organizers to specific levels.
 - 💡 **Telegram Mini App player view** — richer in-Telegram player experience.
   Not recommended until there's evidence the web view is a real friction point.
-- 💡 **Multi-chat / forum topics** — per-level threads if the community grows.
-  Not recommended until growth actually demands it.
+- 💡 **Multi-chat / dynamic multi-topic routing** — per-level threads, or
+  routing across separate chats entirely, if the community grows. Distinct
+  from the single fixed `TELEGRAM_TOPIC_ID` shipped in Milestone 10 (one
+  hardcoded topic the board always posts to) — this item is about *choosing*
+  a destination dynamically, not having one at all. Not recommended until
+  growth actually demands it.
 - 💡 **Quiet hours / per-user reminder lead time** — for opted-in players.
 - 💡 **Automatic board burial repost** — see Milestone 6; only if the manual
   «Отправить в группу» button becomes a real burden at scale.

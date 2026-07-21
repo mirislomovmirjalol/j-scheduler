@@ -134,7 +134,7 @@ export default function Hero({ bgImage }: { bgImage?: string | null }) {
 }
 
 // Signature element: the real shape of a match card (see
-// packages/backend/convex/lib/board.ts + the admin dashboard), fed by
+// packages/backend/convex/lib/matchMessage.ts + the admin dashboard), fed by
 // matches.listPublicUpcoming — grounds the marketing site in the actual
 // product instead of stock sports imagery. No player names (public,
 // unauthenticated query — see the backend comment on that query).

@@ -1,11 +1,14 @@
 import { api } from "@J-schedule/backend/convex/_generated/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@J-schedule/ui/components/card"
+import { Empty, EmptyDescription } from "@J-schedule/ui/components/empty"
+import { Skeleton } from "@J-schedule/ui/components/skeleton"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useQuery } from "convex/react"
 
 import DigitGroup from "@/components/digit-group"
 import MatchCalendarHeatmap from "@/components/match-calendar-heatmap"
 import { FillRateTrendChart, MatchesPerMonthChart } from "@/components/match-trend-charts"
+import Reveal from "@/components/reveal"
 import StatCard from "@/components/stat-card"
 import StatCardGrid from "@/components/stat-card-grid"
 import { formatTashkentDateTime } from "@/lib/format"
@@ -22,6 +25,23 @@ function HomePage() {
   const players = useQuery(api.players.listAll)
   const calendar = useQuery(api.matches.listAllForCalendar)
 
+  if (player === undefined) {
+    return (
+      <div className="mx-auto flex max-w-4xl flex-col gap-6 p-6">
+        <Skeleton className="h-8 w-48" />
+        <StatCardGrid>
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-24 w-full" />
+          ))}
+        </StatCardGrid>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Skeleton className="h-40 w-full" />
+          <Skeleton className="h-40 w-full" />
+        </div>
+      </div>
+    )
+  }
+
   const openSeats = matches?.reduce(
     (sum, { match, roster }) => sum + Math.max(match.maxMembers - roster.length, 0),
     0,
@@ -36,7 +56,7 @@ function HomePage() {
   const newest = matches ? [...matches].sort((a, b) => b.match.createdAt - a.match.createdAt) : []
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6 p-6">
+    <Reveal className="mx-auto flex max-w-4xl flex-col gap-6 p-6">
       <h1 className="text-2xl font-semibold tracking-tight">
         Привет{player ? `, ${player.firstName}` : ""}!
       </h1>
@@ -121,7 +141,7 @@ function HomePage() {
           </div>
         </>
       )}
-    </div>
+    </Reveal>
   )
 }
 
@@ -153,7 +173,9 @@ function MatchPreviewList({
       </CardHeader>
       <CardContent className="flex flex-col gap-1">
         {entries.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{emptyText}</p>
+          <Empty className="p-4">
+            <EmptyDescription>{emptyText}</EmptyDescription>
+          </Empty>
         ) : (
           entries.map(({ match, roster }) => (
             <Link

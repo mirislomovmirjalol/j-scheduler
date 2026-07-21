@@ -14,6 +14,7 @@ import {
 import { Badge } from "@J-schedule/ui/components/badge"
 import { Button } from "@J-schedule/ui/components/button"
 import { Checkbox } from "@J-schedule/ui/components/checkbox"
+import { Empty, EmptyDescription, EmptyTitle } from "@J-schedule/ui/components/empty"
 import { Input } from "@J-schedule/ui/components/input"
 import { Skeleton } from "@J-schedule/ui/components/skeleton"
 import {
@@ -129,7 +130,10 @@ function PlayersPage() {
       ) : (
         <Reveal>
           {filtered && filtered.length === 0 && players.length > 0 ? (
-            <p className="text-sm text-muted-foreground">Никого не найдено по этим фильтрам.</p>
+            <Empty>
+              <EmptyTitle>Никого не найдено</EmptyTitle>
+              <EmptyDescription>Попробуй сбросить или изменить фильтры.</EmptyDescription>
+            </Empty>
           ) : (
             <Table>
               <TableHeader>

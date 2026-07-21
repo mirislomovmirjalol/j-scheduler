@@ -23,6 +23,9 @@ function HistoryPage() {
   // its take(200) cap is an acceptable approximation for a numeric label.
   const stats = useQuery(api.matches.listMyHistory)
   const [roleFilter, setRoleFilter] = useState<RoleFilter>(undefined)
+  // Captured once — see matches.index.tsx's comment on why this can't be
+  // Date.now() recomputed inside the paginated query itself.
+  const [now] = useState(() => Date.now())
 
   // The actual scrollable list — real cursor pagination, no cap. Changing
   // role re-queries from scratch (Convex resets pagination when args
@@ -33,7 +36,7 @@ function HistoryPage() {
     loadMore,
   } = usePaginatedQuery(
     api.matches.listMyHistoryPage,
-    { role: roleFilter },
+    { role: roleFilter, now },
     { initialNumItems: 20 },
   )
   const isLoadingFirstPage = status === "LoadingFirstPage"
