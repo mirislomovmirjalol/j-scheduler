@@ -71,6 +71,8 @@ function MatchDetailPage() {
   const navigate = useNavigate()
   const [pinOnRepost, setPinOnRepost] = useState(false)
   const [reposting, setReposting] = useState(false)
+  const [publishing, setPublishing] = useState(false)
+  const [now] = useState(() => Date.now())
 
   if (detail === undefined) {
     return (
@@ -94,7 +96,7 @@ function MatchDetailPage() {
   // Attendance only makes sense in hindsight — everyone defaults to
   // "attended" (schema.ts), so the flag-a-no-show toggle only appears once
   // there's something to correct.
-  const isPastMatch = match.startsAt < Date.now()
+  const isPastMatch = match.startsAt < now
 
   return (
     <Reveal className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
@@ -133,16 +135,20 @@ function MatchDetailPage() {
             {!match.isPublished && (
               <Button
                 className="w-full sm:w-auto"
+                disabled={publishing}
                 onClick={async () => {
+                  setPublishing(true)
                   try {
                     await publishMatch({ matchId: match._id })
                     toast.success("Игра опубликована в группе")
                   } catch {
                     toast.error("Не получилось опубликовать игру")
+                  } finally {
+                    setPublishing(false)
                   }
                 }}
               >
-                Опубликовать
+                <TextSwap>{publishing ? "Публикуем…" : "Опубликовать"}</TextSwap>
               </Button>
             )}
             {match.isPublished && (
@@ -365,6 +371,11 @@ function MemberSection({
   const promoteFromWaitlist = useMutation(api.memberships.promoteFromWaitlist)
   const setNoShow = useMutation(api.memberships.setNoShow)
   const setPaid = useMutation(api.memberships.setPaid)
+  // Keyed by membership id — this table renders one row per member inline
+  // rather than as its own component, so a per-row SuccessCheck trigger
+  // can't be plain useState the way PlayerRow does it.
+  const [noShowTriggers, setNoShowTriggers] = useState<Record<string, number>>({})
+  const [paidTriggers, setPaidTriggers] = useState<Record<string, number>>({})
 
   return (
     <div>
@@ -428,6 +439,10 @@ function MemberSection({
                               membershipId: membership._id,
                               noShow: !e.target.checked,
                             })
+                            setNoShowTriggers((t) => ({
+                              ...t,
+                              [membership._id]: (t[membership._id] ?? 0) + 1,
+                            }))
                           } catch {
                             toast.error("Не получилось отметить посещение")
                           }
@@ -438,27 +453,35 @@ function MemberSection({
                       ) : (
                         <span>пришёл</span>
                       )}
+                      <SuccessCheck trigger={noShowTriggers[membership._id] ?? 0} />
                     </label>
                   </TableCell>
                 )}
                 {showPaid && (
                   <TableCell>
-                    <Button
-                      size="sm"
-                      variant={membership.paid ? "default" : "outline"}
-                      onClick={async () => {
-                        try {
-                          await setPaid({
-                            membershipId: membership._id,
-                            paid: !membership.paid,
-                          })
-                        } catch {
-                          toast.error("Не получилось отметить оплату")
-                        }
-                      }}
-                    >
-                      {membership.paid ? "✅ Оплачено" : "Отметить оплату"}
-                    </Button>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        size="sm"
+                        variant={membership.paid ? "default" : "outline"}
+                        onClick={async () => {
+                          try {
+                            await setPaid({
+                              membershipId: membership._id,
+                              paid: !membership.paid,
+                            })
+                            setPaidTriggers((t) => ({
+                              ...t,
+                              [membership._id]: (t[membership._id] ?? 0) + 1,
+                            }))
+                          } catch {
+                            toast.error("Не получилось отметить оплату")
+                          }
+                        }}
+                      >
+                        {membership.paid ? "✅ Оплачено" : "Отметить оплату"}
+                      </Button>
+                      <SuccessCheck trigger={paidTriggers[membership._id] ?? 0} />
+                    </div>
                   </TableCell>
                 )}
                 {showActions && (

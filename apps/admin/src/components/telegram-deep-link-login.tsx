@@ -23,19 +23,22 @@ export default function TelegramDeepLinkLogin({
 }) {
   const createRequest = useMutation(api.webLogin.create)
   const [code, setCode] = useState<string | null>(null)
-  const [signingIn, setSigningIn] = useState(false)
   const [error, setError] = useState(false)
   // Guards against StrictMode's intentional double-invoke of mount effects
   // in dev — without this, two codes get created almost simultaneously and
   // whichever request resolves last silently swaps the displayed link out
   // from under a user who already opened the first one in Telegram.
   const startedRef = useRef(false)
+  // Effect-internal lock against the "confirmed" effect re-firing the sign-in
+  // request on every reactive re-render of `status` — a ref rather than
+  // state since nothing in the render output reads it.
+  const signingInRef = useRef(false)
 
   const status = useQuery(api.webLogin.getStatus, code ? { code } : "skip")
 
   const startRequest = () => {
     setError(false)
-    setSigningIn(false)
+    signingInRef.current = false
     setCode(null)
     createRequest({})
       .then(({ code }) => setCode(code))
@@ -50,8 +53,8 @@ export default function TelegramDeepLinkLogin({
   }, [])
 
   useEffect(() => {
-    if (status?.status !== "confirmed" || !code || signingIn) return
-    setSigningIn(true)
+    if (status?.status !== "confirmed" || !code || signingInRef.current) return
+    signingInRef.current = true
     ;(async () => {
       try {
         // Must go through authClient's own $fetch, not a raw fetch() — only
@@ -69,7 +72,7 @@ export default function TelegramDeepLinkLogin({
         setError(true)
       }
     })()
-  }, [status, code, signingIn, onSuccess])
+  }, [status, code, onSuccess])
 
   if (error || status?.status === "expired") {
     return (

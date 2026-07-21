@@ -78,8 +78,12 @@ function PlayerProfilePage() {
             size="sm"
             onClick={async () => {
               const url = `${window.location.origin}/p/${player._id}`
-              await navigator.clipboard.writeText(url)
-              toast.success("Публичная ссылка скопирована")
+              try {
+                await navigator.clipboard.writeText(url)
+                toast.success("Публичная ссылка скопирована")
+              } catch {
+                toast.error("Не получилось скопировать ссылку")
+              }
             }}
           >
             Скопировать публичную ссылку

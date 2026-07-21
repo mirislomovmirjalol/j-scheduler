@@ -25,20 +25,20 @@ type SignInResponse = { success: true; userId: string }
 //  - Otherwise (a regular browser, e.g. local dev testing) -> fall back to
 //    the deep-link flow.
 export default function TelegramLogin({ onSuccess }: { onSuccess: () => void }) {
-  const [state, setState] = useState<"checking" | "none" | "signing-in" | "error">(
-    "checking"
+  // apps/admin is a client-only SPA (no SSR), so window.Telegram is already
+  // populated by the time this component first renders — no need to route
+  // that read through an effect+setState round trip just to derive the
+  // initial state.
+  const [state, setState] = useState<"none" | "signing-in" | "error">(() =>
+    window.Telegram?.WebApp?.initData ? "signing-in" : "none"
   )
 
   useEffect(() => {
     const webApp = window.Telegram?.WebApp
     webApp?.ready?.()
 
-    if (!webApp?.initData) {
-      setState("none")
-      return
-    }
+    if (!webApp?.initData) return
 
-    setState("signing-in")
     ;(async () => {
       try {
         const { error } = await authClient.$fetch<SignInResponse>(
@@ -51,11 +51,8 @@ export default function TelegramLogin({ onSuccess }: { onSuccess: () => void }) 
         setState("error")
       }
     })()
-  }, [onSuccess])
-
-  if (state === "checking") {
-    return <p className="text-sm text-muted-foreground">Проверяем…</p>
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   if (state === "signing-in") {
     return <p className="text-sm text-muted-foreground">Входим…</p>

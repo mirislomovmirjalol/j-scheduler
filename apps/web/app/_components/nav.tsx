@@ -3,7 +3,7 @@
 import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { createPortal } from "react-dom"
 import { AnimatePresence, motion } from "motion/react"
 
@@ -16,6 +16,15 @@ const links = [
   { href: "/community", label: "Сообщество" },
   { href: "/about", label: "О клубе" },
 ]
+
+// useSyncExternalStore's server/client snapshot split is the React-blessed
+// way to get an SSR-safe "has this hydrated on the client yet" flag without
+// the extra setState-in-effect render a `useEffect(() => setMounted(true))`
+// mount guard would cost — the client snapshot is stable at `true` forever,
+// so subscribe never needs to fire.
+const subscribeNever = () => () => {}
+const getClientMounted = () => true
+const getServerMounted = () => false
 
 // Sections with a dark (bg-ink) background opt in via data-nav-theme="dark"
 // (see cta-band.tsx, community/guidelines.tsx). Everything else is assumed
@@ -290,16 +299,17 @@ function MobileMenu({ isDark, logoWhite }: { isDark: boolean; logoWhite?: string
   // *inside* the header would position itself relative to the header's
   // own ~70px box instead of the viewport. Portaling to body escapes
   // that ancestor entirely regardless of what the header does.
-  const [mounted, setMounted] = useState(false)
+  const mounted = useSyncExternalStore(subscribeNever, getClientMounted, getServerMounted)
   const pathname = usePathname()
 
-  useEffect(() => {
-    setMounted(true)
-  }, [])
-
-  useEffect(() => {
+  // Close the menu on navigation — adjusted during render (React's
+  // documented pattern for reacting to a prop change without an extra
+  // effect+setState round trip) rather than in a useEffect.
+  const [prevPathname, setPrevPathname] = useState(pathname)
+  if (pathname !== prevPathname) {
+    setPrevPathname(pathname)
     setOpen(false)
-  }, [pathname])
+  }
 
   useEffect(() => {
     if (!open) return
