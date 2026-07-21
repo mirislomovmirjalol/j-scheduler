@@ -80,7 +80,9 @@ function ProfilePage() {
               authClient.signOut({
                 fetchOptions: {
                   onSuccess: () => navigate({ to: "/login" }),
-                  onError: () => toast.error("Не получилось выйти"),
+                  onError: () => {
+                    toast.error("Не получилось выйти")
+                  },
                 },
               })
             }}
